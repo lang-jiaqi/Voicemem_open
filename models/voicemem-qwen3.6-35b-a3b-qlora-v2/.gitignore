@@ -1,0 +1,10 @@
+# Weights live in the dedicated Hugging Face model repository.
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+optimizer*
+scheduler*
+rng_state_*
+zero_*

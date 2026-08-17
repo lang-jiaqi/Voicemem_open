@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voicemem"
+version = "0.1.0"
+description = "Left-brain/right-brain memory framework with an optional audio-native perception layer (scene/speaker/emotion)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Lang Jiaqi" }]
+dependencies = [
+    "numpy",
+    "openai",
+    # Raw fact storage backend (voicemem/leftbrain/mem0_backend_store.py) --
+    # voicemem's own cognitive_graph/rightbrain graph layers stay custom code,
+    # this only replaces the low-level "store text + embed + vector search"
+    # layer that used to be voicemem's own from-scratch SQLite store.
+    "mem0ai",
+]
+
+[project.optional-dependencies]
+# Prosody-based VAD emotion estimation straight from the waveform
+# (emotion/vad_audio.py).
+audio = [
+    "soundfile",
+]
+# Background-scene / music / abnormal-sound detection via the Audio
+# Spectrogram Transformer (environment_detector_ast.py) — the default,
+# immediate-hint environmental sound backend. The model weights are
+# downloaded once by Transformers, or can be shipped beside the application
+# and selected with VOICEMEM_ENVIRONMENT_MODEL_DIR.
+environment = [
+    "torch",
+    "transformers",
+    "soundfile",
+    "scipy",
+]
+# Optional CLAP refinement pass for the background-sound *description* memory
+# only (4s-segmented, higher accuracy than AST's raw hint). AST still supplies
+# the immediate hint and still covers music/abnormal-sound detection and the
+# place-clustering embedding. Set VOICEMEM_CLAP_CHECKPOINT to enable.
+clap = [
+    "torch",
+    "laion-clap",
+    "soundfile",
+    "scipy",
+]
+# Multimodal emotion attribution directly on raw audio via Qwen2.5-Omni
+# (emotion/attribution_qwen_omni.py) — see examples/load_qwen_omni_attributor.py.
+omni = [
+    "torch",
+    "transformers>=4.50",
+]
+# Speaker recognition (3D-Speaker ERes2Net via a sherpa-onnx worker subprocess
+# + adaptive voiceprint profiles), plus optional emotion2vec+ emotion
+# detection (funasr/modelscope). Heavy; kept separate from the base install.
+voiceprint = [
+    "sherpa-onnx",
+    "funasr",
+    "modelscope",
+]
+# service/ WebSocket backend (Gemini Live): ASR/VAD, speaker/emotion signals.
+service = [
+    "websockets",
+    "jieba",
+    "model2vec",
+    "sherpa-onnx",
+    "funasr",
+    "torch",
+    "google-genai",
+]
+
+[tool.setuptools.packages.find]
+include = ["voicemem*"]

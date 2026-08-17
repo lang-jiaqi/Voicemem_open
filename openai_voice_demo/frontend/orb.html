@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>voicemem orb</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* Designed for a transparent, frameless, always-on-top Electron window
+     (desktop/main.js) -- body stays transparent so only the orb + panels
+     show as floating UI. Opening this in a normal browser tab also works
+     for development (you just see it on a plain background). */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: transparent; height: 100%; overflow: hidden;
+               font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  #stage { display: flex; align-items: center; justify-content: center;
+           gap: 18px; height: 100%; padding: 12px; }
+
+  /* ---- side panels: left brain / right brain ---- */
+  .panel {
+    width: 320px; max-height: 340px; overflow-y: auto;
+    background: rgba(20, 24, 34, 0.82); backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.10); border-radius: 14px;
+    padding: 12px 14px; color: #dbe2ee; font-size: 12px; line-height: 1.55;
+    opacity: 0; transform: translateY(6px); transition: opacity .35s, transform .35s;
+    -webkit-app-region: no-drag;
+  }
+  .panel.show { opacity: 1; transform: none; }
+  .panel h3 { font-size: 11px; letter-spacing: .12em; color: #8b93a7;
+              margin-bottom: 8px; font-weight: 600; }
+  .panel .item { margin-bottom: 8px; padding-bottom: 8px;
+                 border-bottom: 1px dashed rgba(255,255,255,0.08); }
+  .panel .item:last-child { border-bottom: none; margin-bottom: 0; }
+  .panel .tag { display: inline-block; font-size: 10px; padding: 1px 6px;
+                border-radius: 6px; margin-right: 6px; vertical-align: 1px; }
+  .tag.relation { background: #3b2f63; color: #c9b8ff; }
+  .tag.emotion_trait { background: #5c2e46; color: #ffb8d6; }
+  .tag.situation_pattern { background: #223a5e; color: #9cc3ff; }
+  .tag.profile { background: #1f4a3d; color: #93e6c6; }
+  .tag.response_experience { background: #4a3b1f; color: #e6cf93; }
+  .tag.current_signal { background: #333; color: #ccc; }
+  .scorebar { height: 3px; border-radius: 2px; background: rgba(255,255,255,0.10);
+              margin-top: 4px; overflow: hidden; }
+  .scorebar > i { display: block; height: 100%; background: #5b8cff; }
+
+  /* ---- the orb: layered glassy sphere ----
+     Structure: an outer soft halo (::before, blurred, hue-shifts by state),
+     the sphere body (layered radial gradients: deep base + top-left specular
+     highlight + bottom rim light), and a slowly drifting inner sheen
+     (::after) that gives it the "alive glass" feel. A thin conic ring
+     (#ring) orbits only while speaking. */
+  #orbWrap { display: flex; flex-direction: column; align-items: center; gap: 12px;
+             -webkit-app-region: drag; /* drag the whole window by the orb */ }
+  #orbBox { position: relative; width: 132px; height: 132px;
+            display: flex; align-items: center; justify-content: center; }
+  #orb {
+    position: relative; width: 112px; height: 112px; border-radius: 50%;
+    background:
+      radial-gradient(circle at 33% 26%, rgba(255,255,255,.85) 0%, rgba(255,255,255,0) 22%),
+      radial-gradient(circle at 70% 85%, rgba(120,180,255,.35) 0%, rgba(120,180,255,0) 40%),
+      radial-gradient(circle at 50% 45%, #6f8fee 0%, #3a51c9 48%, #17205e 82%, #0b1032 100%);
+    box-shadow:
+      inset 0 -10px 24px rgba(10, 16, 60, .55),
+      inset 0 8px 18px rgba(255, 255, 255, .16),
+      0 6px 28px rgba(30, 50, 160, .38);
+    transition: filter .45s, box-shadow .45s;
+    overflow: hidden;
+  }
+  #orb::after { /* drifting inner sheen */
+    content: ""; position: absolute; inset: -40%;
+    background: radial-gradient(circle at 50% 50%, rgba(255,255,255,.14) 0%, rgba(255,255,255,0) 34%);
+    animation: sheen 9s ease-in-out infinite;
+  }
+  #orbBox::before { /* outer halo, colored by state via CSS var */
+    content: ""; position: absolute; inset: 0; border-radius: 50%;
+    background: radial-gradient(circle, var(--halo, rgba(90,120,255,.38)) 0%, rgba(0,0,0,0) 70%);
+    filter: blur(10px); z-index: -1;
+    transition: opacity .5s; opacity: var(--halo-opacity, .7);
+  }
+  #ring { /* speaking-only orbit ring */
+    position: absolute; inset: 2px; border-radius: 50%;
+    background: conic-gradient(from 0deg, rgba(140,240,200,0) 0%, rgba(140,240,200,.8) 12%, rgba(140,240,200,0) 26%);
+    -webkit-mask: radial-gradient(circle, transparent 62%, #000 64%, #000 68%, transparent 70%);
+            mask: radial-gradient(circle, transparent 62%, #000 64%, #000 68%, transparent 70%);
+    opacity: 0; transition: opacity .35s; animation: orbit 2.4s linear infinite;
+  }
+  @keyframes sheen  { 0%,100% { transform: translate(-6%, -4%);} 50% { transform: translate(7%, 6%);} }
+  @keyframes orbit  { to { transform: rotate(360deg); } }
+  @keyframes breathe{ 0%,100% { transform: scale(1);} 50% { transform: scale(1.028);} }
+  @keyframes pulse  { 0%,100% { transform: scale(1);} 50% { transform: scale(1.05);} }
+
+  #orbBox.idle      { --halo: rgba(90,120,255,.22); --halo-opacity: .45; }
+  #orbBox.idle #orb { filter: saturate(.55) brightness(.82); animation: breathe 4.5s ease-in-out infinite; }
+  #orbBox.listening { --halo: rgba(90,140,255,.5); }
+  #orbBox.listening #orb { animation: pulse 1.8s ease-in-out infinite; }
+  #orbBox.speaking  { --halo: rgba(90,230,170,.5); }
+  #orbBox.speaking #orb {
+    background:
+      radial-gradient(circle at 33% 26%, rgba(255,255,255,.85) 0%, rgba(255,255,255,0) 22%),
+      radial-gradient(circle at 70% 85%, rgba(120,255,200,.35) 0%, rgba(120,255,200,0) 40%),
+      radial-gradient(circle at 50% 45%, #5fe0ae 0%, #1f9e74 48%, #0d4a37 82%, #06231b 100%);
+    animation: breathe 2.2s ease-in-out infinite;
+  }
+  #orbBox.speaking #ring { opacity: 1; }
+  #orbBox.paused    { --halo: rgba(255,190,90,.45); }
+  #orbBox.paused #orb {
+    background:
+      radial-gradient(circle at 33% 26%, rgba(255,255,255,.8) 0%, rgba(255,255,255,0) 22%),
+      radial-gradient(circle at 70% 85%, rgba(255,210,140,.3) 0%, rgba(255,210,140,0) 40%),
+      radial-gradient(circle at 50% 45%, #eec076 0%, #b8863a 48%, #5c4118 82%, #2b1e0a 100%);
+  }
+
+  /* buttons: the clickable parts of the orb column, so they opt out of
+     the drag region */
+  .btnRow { display: flex; gap: 8px; -webkit-app-region: no-drag; }
+  #toggle, #langBtn {
+    -webkit-app-region: no-drag; cursor: pointer;
+    font-size: 11px; color: #cfd6e4; background: rgba(20,24,34,0.82);
+    border: 1px solid rgba(255,255,255,0.14); border-radius: 999px;
+    padding: 5px 14px; backdrop-filter: blur(10px); user-select: none;
+  }
+  #toggle:hover, #langBtn:hover { background: rgba(40,48,66,0.9); }
+  #langBtn { padding: 5px 10px; color: #98a2b8; }
+
+  #caption {
+    -webkit-app-region: no-drag;
+    max-width: 300px; min-height: 17px; text-align: center;
+    font-size: 12px; color: #aeb6c6; text-shadow: 0 1px 3px rgba(0,0,0,.55);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <div class="panel" id="leftPanel"><h3 id="leftTitle"></h3><div id="leftItems"></div></div>
+    <div id="orbWrap">
+      <div id="orbBox" class="idle">
+        <div id="orb"></div>
+        <div id="ring"></div>
+      </div>
+      <div id="caption"></div>
+      <div class="btnRow">
+        <div id="toggle"></div>
+        <div id="langBtn" title="switch language"></div>
+      </div>
+    </div>
+    <div class="panel" id="rightPanel"><h3 id="rightTitle"></h3><div id="rightItems"></div></div>
+  </div>
+
+<script>
+(() => {
+  const SAMPLE_RATE = 24000;
+  const PREBUFFER_SECONDS = 0.25;
+  const orbBox = document.getElementById("orbBox");
+  const captionEl = document.getElementById("caption");
+  const toggleBtn = document.getElementById("toggle");
+  const langBtn = document.getElementById("langBtn");
+  const leftPanel = document.getElementById("leftPanel");
+  const rightPanel = document.getElementById("rightPanel");
+  const leftItems = document.getElementById("leftItems");
+  const rightItems = document.getElementById("rightItems");
+  const leftTitle = document.getElementById("leftTitle");
+  const rightTitle = document.getElementById("rightTitle");
+
+  // ---- UI language (zh / en), persisted across reloads ----
+  const I18N = {
+    zh: {
+      leftTitle: "左脑 · 事实记忆", rightTitle: "右脑 · 情感画像",
+      start: "开始对话", stop: "结束对话", langBtn: "EN",
+      connecting: "连接中…", connected: "已连接", disconnected: "连接断开",
+      connError: "连接出错", ready: m => `就绪 (${m})`,
+      you: "你", ai: "AI", listening: "在听…", ended: "已结束",
+      micFail: "麦克风不可用: ", playError: "播放错误: ", error: "错误: ",
+      noLeft: "（这轮没有命中的事实记忆）", noRight: "（这轮没有右脑内容）",
+      tags: { relation: "关系", emotion_trait: "情绪特质", situation_pattern: "情景模式",
+              profile: "画像", response_experience: "应对经验", current_signal: "当下信号" },
+    },
+    en: {
+      leftTitle: "Left Brain · Facts", rightTitle: "Right Brain · Persona",
+      start: "Start", stop: "End", langBtn: "中",
+      connecting: "connecting…", connected: "connected", disconnected: "disconnected",
+      connError: "connection error", ready: m => `ready (${m})`,
+      you: "You", ai: "AI", listening: "listening…", ended: "ended",
+      micFail: "microphone unavailable: ", playError: "playback error: ", error: "error: ",
+      noLeft: "(no factual memories this turn)", noRight: "(no right-brain content this turn)",
+      tags: { relation: "relation", emotion_trait: "emotion trait", situation_pattern: "situation",
+              profile: "profile", response_experience: "experience", current_signal: "signal" },
+    },
+  };
+  let lang = localStorage.getItem("orb_lang") || "zh";
+  const t = (key) => I18N[lang][key];
+
+  function applyLang() {
+    leftTitle.textContent = t("leftTitle");
+    rightTitle.textContent = t("rightTitle");
+    toggleBtn.textContent = recording ? t("stop") : t("start");
+    langBtn.textContent = t("langBtn");
+    if (lastPanelMsg) renderPanels(lastPanelMsg);  // re-render tags/placeholders in the new language
+  }
+
+  let ws = null;
+  let mode = "?";
+  // Separate contexts: suspending playback must never freeze mic capture --
+  // same load-bearing split as frontend/index.html, see the comment there.
+  let playCtx = null;
+  let micCtx = null;
+  let micStream = null;
+  let micProcessor = null;
+  let recording = false;
+  let nextPlayTime = 0;
+  let scheduledSources = [];
+  let pendingAnswerText = "";
+  let answerAudioStarted = false;
+  let answerText = "";
+
+  function setCaption(text) { captionEl.textContent = text; }
+
+  // ---- orb state machine: derived, refreshed on a timer ----
+  function refreshOrb() {
+    let cls = "idle";
+    if (playCtx && playCtx.state === "suspended") cls = "paused";
+    else if (isPlaying()) cls = "speaking";
+    else if (recording) cls = "listening";
+    if (!orbBox.classList.contains(cls)) orbBox.className = cls;
+  }
+  setInterval(refreshOrb, 150);
+
+  function hidePanels() {
+    leftPanel.classList.remove("show");
+    rightPanel.classList.remove("show");
+  }
+
+  // ---- memory panels: the whole point of this UI ----
+  function esc(s) {
+    const d = document.createElement("div");
+    d.textContent = s;
+    return d.innerHTML;
+  }
+  let lastPanelMsg = null;
+  function renderPanels(msg) {
+    lastPanelMsg = msg;
+    const lb = msg.left_brain || [];
+    const rb = msg.right_brain_hits || [];
+    leftItems.innerHTML = lb.length
+      ? lb.map(h => `<div class="item">${esc(h.text)}` +
+          `<div class="scorebar"><i style="width:${Math.round((h.score || 0) * 100)}%"></i></div></div>`).join("")
+      : `<div class="item" style="color:#6b7386">${esc(t("noLeft"))}</div>`;
+    rightItems.innerHTML = rb.length
+      ? rb.map(h => `<div class="item"><span class="tag ${esc(h.source || "profile")}">${esc(t("tags")[h.source] || h.source || "?")}</span>${esc(h.content)}</div>`).join("")
+      : `<div class="item" style="color:#6b7386">${esc(t("noRight"))}</div>`;
+    leftPanel.classList.add("show");
+    rightPanel.classList.add("show");
+  }
+
+  // ---- WebSocket ----
+  function connect() {
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    ws = new WebSocket(`${proto}://${location.host}/ws`);
+    ws.binaryType = "arraybuffer";
+    ws.onopen = () => setCaption(t("connected"));
+    ws.onclose = () => { setCaption(t("disconnected")); recording = false; hidePanels(); };
+    ws.onerror = () => setCaption(t("connError"));
+    ws.onmessage = (evt) => {
+      if (evt.data instanceof ArrayBuffer) {
+        if (!answerAudioStarted) {
+          answerAudioStarted = true;
+          if (pendingAnswerText) { answerText += pendingAnswerText; pendingAnswerText = ""; setCaption(t("ai") + ": " + answerText); }
+        }
+        try { playPcm(evt.data); } catch (e) { setCaption(t("playError") + e); }
+        return;
+      }
+      handleMessage(JSON.parse(evt.data));
+    };
+  }
+
+  function handleMessage(msg) {
+    switch (msg.type) {
+      case "session_ready":
+        mode = msg.mode;
+        setCaption(t("ready")(mode));
+        break;
+      case "partial_transcript": {
+        const prefix = t("you") + ": ";
+        const cur = captionEl.textContent.startsWith(prefix)
+          ? captionEl.textContent.slice(prefix.length) : "";
+        setCaption(prefix + (msg.replace ? msg.text : cur + msg.text));
+        break;
+      }
+      case "user_transcript":
+        setCaption(t("you") + ": " + msg.text);
+        break;
+      case "memory_hits":
+        renderPanels(msg);
+        break;
+      case "answer_start":
+        if (playCtx && playCtx.state === "suspended") playCtx.resume();
+        answerText = "";
+        pendingAnswerText = "";
+        answerAudioStarted = false;
+        break;
+      case "answer_delta":
+        if (answerAudioStarted) { answerText += msg.text; setCaption(t("ai") + ": " + answerText); }
+        else pendingAnswerText += msg.text;
+        break;
+      case "answer_done":
+        if (pendingAnswerText) { answerText += pendingAnswerText; pendingAnswerText = ""; setCaption(t("ai") + ": " + answerText); }
+        break;
+      case "speech_tentative":
+        if (isPlaying()) playCtx.suspend();
+        break;
+      case "answer_resume":
+        if (playCtx && playCtx.state === "suspended") playCtx.resume();
+        break;
+      case "answer_interrupt":
+        pendingAnswerText = "";
+        if (scheduledSources.length > 0) stopPlayback();
+        if (playCtx && playCtx.state === "suspended") playCtx.resume();
+        break;
+      case "error":
+        setCaption(t("error") + msg.message);
+        break;
+    }
+  }
+
+  // ---- playback (identical mechanics to frontend/index.html) ----
+  function playPcm(arrayBuffer) {
+    if (!playCtx) playCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const int16 = new Int16Array(arrayBuffer);
+    const float32 = new Float32Array(int16.length);
+    for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768;
+    const buffer = playCtx.createBuffer(1, float32.length, SAMPLE_RATE);
+    buffer.copyToChannel(float32, 0);
+    const source = playCtx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(playCtx.destination);
+    scheduledSources.push(source);
+    source.onended = () => {
+      const i = scheduledSources.indexOf(source);
+      if (i !== -1) scheduledSources.splice(i, 1);
+    };
+    const now = playCtx.currentTime;
+    const startAt = nextPlayTime > now ? nextPlayTime : now + PREBUFFER_SECONDS;
+    source.start(startAt);
+    nextPlayTime = startAt + buffer.duration;
+  }
+  function isPlaying() {
+    return playCtx !== null && scheduledSources.length > 0 && playCtx.state === "running";
+  }
+  function stopPlayback() {
+    for (const s of scheduledSources.splice(0)) {
+      try { s.stop(); } catch (e) { /* already ended */ }
+    }
+    if (playCtx) nextPlayTime = playCtx.currentTime;
+  }
+
+  // ---- mic capture (identical mechanics to frontend/index.html) ----
+  function downsample(float32, fromRate, toRate) {
+    if (fromRate === toRate) return float32;
+    const ratio = fromRate / toRate;
+    const outLength = Math.round(float32.length / ratio);
+    const out = new Float32Array(outLength);
+    for (let i = 0; i < outLength; i++) {
+      const srcIdx = i * ratio;
+      const i0 = Math.floor(srcIdx);
+      const i1 = Math.min(i0 + 1, float32.length - 1);
+      const frac = srcIdx - i0;
+      out[i] = float32[i0] * (1 - frac) + float32[i1] * frac;
+    }
+    return out;
+  }
+  function floatTo16BitPCM(float32) {
+    const out = new Int16Array(float32.length);
+    for (let i = 0; i < float32.length; i++) {
+      const s = Math.max(-1, Math.min(1, float32[i]));
+      out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    }
+    return out;
+  }
+
+  async function startMic() {
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    if (!micCtx) micCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = micCtx.createMediaStreamSource(micStream);
+    micProcessor = micCtx.createScriptProcessor(4096, 1, 1);
+    const silentGain = micCtx.createGain();
+    silentGain.gain.value = 0;
+    micProcessor.onaudioprocess = (e) => {
+      if (!recording || !ws || ws.readyState !== WebSocket.OPEN) return;
+      const input = e.inputBuffer.getChannelData(0);
+      const resampled = downsample(input, micCtx.sampleRate, SAMPLE_RATE);
+      ws.send(floatTo16BitPCM(resampled).buffer);
+    };
+    source.connect(micProcessor);
+    micProcessor.connect(silentGain);
+    silentGain.connect(micCtx.destination);
+  }
+  function stopMic() {
+    if (micProcessor) { micProcessor.disconnect(); micProcessor = null; }
+    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  }
+
+  toggleBtn.addEventListener("click", async () => {
+    if (!recording) {
+      try {
+        await startMic();
+      } catch (e) {
+        setCaption(t("micFail") + e);
+        return;
+      }
+      recording = true;
+      toggleBtn.textContent = t("stop");
+      setCaption(t("listening"));
+    } else {
+      recording = false;
+      stopMic();
+      toggleBtn.textContent = t("start");
+      setCaption(t("ended"));
+      // 结束对话后收起两侧记忆面板，只留小球 -- 下一轮对话的第一次
+      // memory_hits 会重新展开它们。
+      hidePanels();
+    }
+  });
+
+  langBtn.addEventListener("click", () => {
+    lang = lang === "zh" ? "en" : "zh";
+    localStorage.setItem("orb_lang", lang);
+    applyLang();
+  });
+
+  applyLang();
+  setCaption(t("connecting"));
+  connect();
+})();
+</script>
+</body>
+</html>

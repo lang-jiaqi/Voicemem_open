@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.claude/
+.DS_Store
+.env
+*.log
+.memos/
+
+# runtime data created by the memory stores
+memory/
+results/
+
+# local model checkpoints (downloaded on first run, not committed)
+*.ckpt
+*.onnx
+
+# Real-time service demo runtime assets
+service/history/
+service/models/
+
+# Electron desktop wrapper (openai_voice_demo/desktop/)
+node_modules/
