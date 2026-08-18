@@ -7,10 +7,20 @@ DEST="${1:-models}"
 mkdir -p "$DEST"
 cd "$DEST"
 
+# 下载器：优先 wget，没有就用 curl（macOS 自带 curl，通常没有 wget）
+if command -v wget >/dev/null 2>&1; then
+    dl(){ wget -q --show-progress -O "$1" "$2"; }
+elif command -v curl >/dev/null 2>&1; then
+    dl(){ curl -fL --progress-bar -o "$1" "$2"; }
+else
+    echo "需要 wget 或 curl，请先安装其一（macOS: brew install wget）" >&2
+    exit 1
+fi
+
 echo "[1/3] streaming ASR (sherpa-onnx, 中英双语 zipformer)..."
 ASR_NAME="sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20"
 if [ ! -d "$ASR_NAME" ]; then
-    wget -q --show-progress \
+    dl "${ASR_NAME}.tar.bz2" \
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${ASR_NAME}.tar.bz2"
     tar xf "${ASR_NAME}.tar.bz2"
     rm "${ASR_NAME}.tar.bz2"
@@ -21,7 +31,7 @@ fi
 echo "[2/3] 说话人识别 (3D-Speaker ERes2Net, ONNX)..."
 SPK_FILE="3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
 if [ ! -f "$SPK_FILE" ]; then
-    wget -q --show-progress \
+    dl "$SPK_FILE" \
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/${SPK_FILE}"
 else
     echo "  已存在，跳过"
@@ -30,7 +40,7 @@ fi
 echo "[3/3] VAD (Silero VAD, ONNX)..."
 VAD_FILE="silero_vad.onnx"
 if [ ! -f "$VAD_FILE" ]; then
-    wget -q --show-progress \
+    dl "$VAD_FILE" \
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${VAD_FILE}"
 else
     echo "  已存在，跳过"

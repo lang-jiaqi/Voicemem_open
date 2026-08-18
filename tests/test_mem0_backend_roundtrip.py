@@ -31,8 +31,8 @@ from pathlib import Path
 # therefore mem0.Memory) is constructed.
 os.environ.setdefault("MEM0_TELEMETRY", "False")
 
-from voicemem.leftbrain.local_memory_store import OpenAILocalEmbedder, OpenAILocalEmbedderConfig
-from voicemem.leftbrain.mem0_backend_store import Mem0BackendStore
+from voicemem_core.leftbrain.local_memory_store import OpenAILocalEmbedder, OpenAILocalEmbedderConfig
+from voicemem_core.leftbrain.mem0_backend_store import Mem0BackendStore
 
 
 @unittest.skipUnless(

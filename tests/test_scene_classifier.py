@@ -1,6 +1,6 @@
 import unittest
 
-from voicemem.scene_classifier import SceneTag, classify_scene
+from voicemem_core.scene_classifier import SceneTag, classify_scene
 
 
 class SceneClassifierTests(unittest.TestCase):

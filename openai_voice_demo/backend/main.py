@@ -9,6 +9,7 @@ building an OpenAI client is cheap and this keeps connection state isolated.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import uvicorn
@@ -68,6 +69,13 @@ app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="fronte
 
 
 if __name__ == "__main__":
+    # 启动前逐个独立测速每个 voicemem 组件，打印测评报告；全部达标直接启动，
+    # 有组件偏慢/异常则在 console 询问是否仍启动。设
+    # VOICEMEM_SKIP_STARTUP_CHECK=1 可整体跳过自检。
+    if os.environ.get("VOICEMEM_SKIP_STARTUP_CHECK", "") not in ("1", "true", "True"):
+        from voicemem_core.startup_check import check_and_gate
+        if not check_and_gate(memory_bridge.vm):
+            raise SystemExit("[openai_voice_demo] 启动已被用户在自检后取消。")
     print(f"[openai_voice_demo] mode={config.voice_mode} audio_native={config.audio_native} "
           f"user_id={config.user_id} -> http://{config.host}:{config.port}/")
     uvicorn.run(app, host=config.host, port=config.port)

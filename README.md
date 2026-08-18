@@ -3,19 +3,19 @@
 VoiceMem is a memory framework for conversational agents built around a
 **left-brain / right-brain split**:
 
-- **Left brain** (`voicemem/leftbrain/`) — structured factual memory: entity
+- **Left brain** (`voicemem_core/leftbrain/`) — structured factual memory: entity
   extraction, a cognitive graph over "slots" (topics, unified under one
   7-value taxonomy — see `cognitive_graph/slot_v2.py`), retrieval by
   slot-classification + entity-narrowing. Raw facts are stored via
   [mem0](https://github.com/mem0ai/mem0) with a local/embedded Qdrant vector
   store (`leftbrain/mem0_backend_store.py`); the cognitive graph itself
   references mem0's memory ids rather than duplicating storage.
-- **Right brain** (`voicemem/rightbrain/`, `voicemem/emotion/`) — episodic /
+- **Right brain** (`voicemem_core/rightbrain/`, `voicemem_core/emotion/`) — episodic /
   emotional memory: per-turn valence-arousal tracking, anomaly detection, and
   memory attribution for emotionally significant turns.
-- **Fusion** (`voicemem/fusion/`) — orchestrates both hemispheres into a
+- **Fusion** (`voicemem_core/fusion/`) — orchestrates both hemispheres into a
   single `Search()` / `Ingest()` API and builds the final prompt context.
-- **Persona / prestimulus** (`voicemem/persona/`, `voicemem/prestimulus/`) —
+- **Persona / prestimulus** (`voicemem_core/persona/`, `voicemem_core/prestimulus/`) —
   a standing user-preference snapshot and pre-loaded task context injected
   ahead of retrieval.
 
@@ -50,22 +50,56 @@ Set `OPENAI_API_KEY` (optionally `OPENAI_BASE_URL` / `OPENAI_MODEL` /
 `OPENAI_EMBEDDING_MODEL`) — the left-brain extraction/classification and
 retrieval ranking call the OpenAI-compatible chat/embeddings API.
 
+## Two layers: `voicemem` (front-desk) vs `voicemem_core` (engine)
+
+- **`voicemem`** — the front-desk (`voicemem.py`): all capabilities wrapped as
+  flat, directly-callable functions returning plain dicts/lists. This is what
+  demos and quick usage import.
+- **`voicemem_core`** — the engine package: the actual implementation
+  (`VoiceMem` class, left/right-brain, fusion, audio-native components). Use it
+  when you need fine-grained control.
+
 ## Quick start
 
 ```python
-from voicemem import VoiceMem
+import voicemem                       # 前台：扁平函数
 
+voicemem.ingest("Had ramen with Alex near the office at noon.")
+for hit in voicemem.search("what did I eat for lunch"):
+    print(hit)                        # {"text": ..., "score": ...}
+```
+
+Need full control? Use the engine directly:
+
+```python
+from voicemem_core import VoiceMem
 vm = VoiceMem()
-
-vm.Ingest("Had ramen with Alex near the office at noon.", speaker="Speaker 0")
 result = vm.Search("what did I eat for lunch", slots=["food"])
-for hit in result.hits:
-    print(hit)
 ```
 
 Memory is stored under `memory/leftbrain/` by default (mem0/Qdrant for raw
 facts, SQLite for the cognitive graph and right-brain data); override the
 root with the `VOICEMEM_MEMORY_ROOT` environment variable.
+
+## Where the front-desk meets the voice layer
+
+The engine's components are all exported from `voicemem_core`, so
+`from voicemem_core import <Component>` works for all of them — the audio-native
+ones (`SpeakerEncoder`, `ASTEnvironmentDetector`, …) load lazily, so plain
+`import voicemem_core` never pulls in torch/sherpa and the text-only core
+install stays light. See `voicemem_core/__init__.py` for the full component
+directory.
+
+`Ingest()` is a three-step pipeline: **preprocess → assemble → write**. The
+first step is a standalone, public **streaming-preprocessing** seam that runs
+all acoustic perception (scene / speaker / emotion …) on one turn of audio and
+returns an `AudioPerception` — via the front-desk `voicemem.preprocess(...)`
+gives you the signals without writing a memory:
+
+```python
+sig = voicemem.preprocess("...", audio_path="turn.wav")   # no write
+print(sig["scene"], sig["speaker_id"], sig["emotion"])
+```
 
 ## Released model adapter
 
@@ -84,7 +118,7 @@ vm.IngestEnv(audio_path="turn.wav")       # background-scene detection only
 ```
 
 `speaker_encoder.py` extracts a 192-dim 3D-Speaker ERes2Net embedding for each
-utterance via a worker subprocess (`voicemem/voiceprint/campplus_worker.py`,
+utterance via a worker subprocess (`voicemem_core/voiceprint/campplus_worker.py`,
 kept separate because it needs `sherpa-onnx`). The worker reads the ONNX
 weights from `service/models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx`
 by default — run `bash scripts/download_models.sh service/models` once to
@@ -120,13 +154,18 @@ python examples/ingest_audio.py path/to/turn.wav --text "..." --ingest   # + ful
 
 ## Demos
 
-Two independent, working demos build on top of `voicemem/` — neither is
+Two independent, working demos build on top of `voicemem_core/` — neither is
 required to use the core package as a library.
 
 **[`openai_voice_demo/`](openai_voice_demo/)** — the actively-maintained
 reference demo: an OpenAI-based (GPT-4o pipeline or Realtime API) voice
 conversation loop with a browser frontend and an Electron desktop wrapper.
-See its own README for setup and architecture.
+See its own README for setup and architecture. On launch it first runs a
+per-component **startup self-check** (`voicemem_core/startup_check.py`) that times
+each component against a speed budget and prints a short console report: if all
+pass it starts directly, otherwise it asks whether to launch anyway. Set
+`VOICEMEM_SKIP_STARTUP_CHECK=1` to skip it, or `VOICEMEM_STARTUP_BUDGET_<KEY>`
+to tune a budget.
 
 **[`service/`](service/)** — an independent, Gemini Live-based WebSocket
 backend (ASR, VAD, speaker/emotion signals, memory retrieval, voice replies).

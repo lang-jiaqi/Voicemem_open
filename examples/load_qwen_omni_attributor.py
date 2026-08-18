@@ -75,8 +75,8 @@ def main() -> None:
     parser.add_argument("--device-map", default="auto")
     args = parser.parse_args()
 
-    from voicemem.emotion.attribution_qwen_omni import QwenOmniEmotionAttributor
-    from voicemem.emotion.types import VAD, TurnEmotionRecord
+    from voicemem_core.emotion.attribution_qwen_omni import QwenOmniEmotionAttributor
+    from voicemem_core.emotion.types import VAD, TurnEmotionRecord
 
     processor, tokenizer, model = load_omni(args.model, dtype=args.dtype, device_map=args.device_map)
     attributor = QwenOmniEmotionAttributor(processor=processor, model=model, tokenizer=tokenizer)

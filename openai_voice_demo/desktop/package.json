@@ -1,12 +1,40 @@
 {
-  "name": "openai-voice-demo-desktop",
+  "name": "voicemem-orb",
+  "productName": "VoiceMem",
   "private": true,
   "version": "0.1.0",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder --mac"
   },
   "devDependencies": {
-    "electron": "^43.2.0"
+    "electron": "^43.2.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "ai.voicemem.orb",
+    "productName": "VoiceMem",
+    "directories": { "output": "release" },
+    "files": ["main.js", "preload.js", "setup.html"],
+    "//": "把 PyInstaller 冻好的后端目录整个拷进 .app 的 Resources/backend；先构建后端（见 BUILD.md）再 npm run dist。",
+    "extraResources": [
+      { "from": "../backend/dist/voicemem-backend", "to": "backend", "filter": ["**/*"] }
+    ],
+    "mac": {
+      "target": ["dmg"],
+      "icon": "build/icon.icns",
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "dmg": {
+      "title": "VoiceMem",
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
+    }
   }
 }

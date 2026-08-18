@@ -18,8 +18,8 @@ import unittest
 import uuid
 from pathlib import Path
 
-from voicemem.leftbrain.cognitive_graph.slot_v2 import SlotV2
-from voicemem.leftbrain.cognitive_graph.store import CognitiveGraphStore
+from voicemem_core.leftbrain.cognitive_graph.slot_v2 import SlotV2
+from voicemem_core.leftbrain.cognitive_graph.store import CognitiveGraphStore
 
 
 class LegacySlotCoercionTests(unittest.TestCase):

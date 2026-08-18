@@ -2,7 +2,7 @@
 
 ```text
 voicemem_opensource/
-├── voicemem/                 Core package: left brain, right brain, fusion, retrieval, memory storage
+├── voicemem_core/                 Core package: left brain, right brain, fusion, retrieval, memory storage
 ├── openai_voice_demo/        Working reference demo (pipeline + realtime voice modes)
 │   ├── backend/               FastAPI app; the only place that imports `voicemem` in this demo
 │   ├── frontend/              Single-file browser client
@@ -17,7 +17,7 @@ voicemem_opensource/
 
 ## Runtime boundaries
 
-- `voicemem/` has no UI/network code of its own — it's a library. Anything that
+- `voicemem_core/` has no UI/network code of its own — it's a library. Anything that
   talks to a model provider, a browser, or a socket lives in one of the demo
   folders below it and imports `voicemem` as a dependency.
 - `openai_voice_demo/backend/memory_bridge.py` is the *only* module in that
@@ -32,8 +32,8 @@ voicemem_opensource/
 
 ## Rules
 
-- `voicemem/` must remain usable without any of the demo folders (no UI
+- `voicemem_core/` must remain usable without any of the demo folders (no UI
   imports leaking into the core package).
 - Each demo (`openai_voice_demo/`, `service/`) owns its own provider/API-key
-  handling; `voicemem/` itself only needs `OPENAI_API_KEY` (and friends) for
+  handling; `voicemem_core/` itself only needs `OPENAI_API_KEY` (and friends) for
   its own internal extraction/classification/ranking calls.

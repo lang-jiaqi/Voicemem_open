@@ -15,7 +15,7 @@ import asyncio
 import traceback
 from pathlib import Path
 
-# backend/ 加进 sys.path，这样 cognitive.py 里 `from voicemem import VoiceMem` 才找得到包
+# backend/ 加进 sys.path，这样 cognitive.py 里 `from voicemem_core import VoiceMem` 才找得到包
 # （service/ 和 voicemem/ 是 backend/ 下的两个平级目录，不是 pip 安装的）。
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(_BACKEND_DIR) not in sys.path:

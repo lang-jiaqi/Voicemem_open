@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from voicemem.voice_input import (
+from voicemem_core.voice_input import (
     VoiceContent,
     VoiceInput,
     VoiceprintRegistry,

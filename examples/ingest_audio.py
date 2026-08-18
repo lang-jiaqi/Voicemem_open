@@ -19,8 +19,8 @@ from pathlib import Path
 
 
 def run_perception_only(audio_path: Path) -> None:
-    from voicemem.emotion.vad_audio import HeuristicWavVADEstimator
-    from voicemem.environment_detector_ast import ASTEnvironmentDetector
+    from voicemem_core.emotion.vad_audio import HeuristicWavVADEstimator
+    from voicemem_core.environment_detector_ast import ASTEnvironmentDetector
 
     vad = HeuristicWavVADEstimator().estimate(str(audio_path))
     print(f"VAD（韵律情绪）:  valence={vad.valence:+.2f}  arousal={vad.arousal:.2f}")
@@ -32,7 +32,7 @@ def run_perception_only(audio_path: Path) -> None:
     print("异常环境音  :", full["abnormal"] or "(无)")
 
     try:
-        from voicemem.speaker_encoder import SpeakerEncoder
+        from voicemem_core.speaker_encoder import SpeakerEncoder
 
         vec = SpeakerEncoder().embed(audio_path)
         print("声纹向量    :", "提取成功，维度=" + str(vec.shape) if vec is not None else "提取失败")
@@ -41,7 +41,7 @@ def run_perception_only(audio_path: Path) -> None:
 
 
 def run_full_ingest(audio_path: Path, text: str) -> None:
-    from voicemem import VoiceMem
+    from voicemem_core import VoiceMem
 
     vm = VoiceMem()
     result = vm.Ingest(text, audio_path=str(audio_path))

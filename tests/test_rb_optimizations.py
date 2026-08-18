@@ -18,13 +18,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from voicemem.rightbrain.anchor_router import (
+from voicemem_core.rightbrain.anchor_router import (
     AnchorRouter,
     normalize_emotion,
     normalize_emotion_strict,
 )
-from voicemem.rightbrain.store import RightBrainStore
-from voicemem.rightbrain.types import (
+from voicemem_core.rightbrain.store import RightBrainStore
+from voicemem_core.rightbrain.types import (
     CurrentSignals,
     MemoryAnchor,
     RightBrainContext,
@@ -103,7 +103,7 @@ class HitRankingAndRenderingTests(unittest.TestCase):
     """_rb_ctx_to_hits：混合排序、日期、inner_os、superseded 标注。"""
 
     def test_blended_priority_lets_specific_heartnote_beat_static_profiles(self):
-        from voicemem.core import _rb_blended_priority
+        from voicemem_core.core import _rb_blended_priority
         hot = _mk_mem(anchor_score=2.0)          # 强锚点命中的 heartnote
         cold = _mk_mem(anchor_score=0.0)
         self.assertAlmostEqual(_rb_blended_priority(cold), 0.5)
@@ -111,20 +111,20 @@ class HitRankingAndRenderingTests(unittest.TestCase):
         self.assertLess(_rb_blended_priority(hot), 1.0)
 
     def test_hit_content_has_date_prefix(self):
-        from voicemem.core import _rb_ctx_to_hits
+        from voicemem_core.core import _rb_ctx_to_hits
         ctx = RightBrainContext(situation_patterns=[_mk_mem()])
         hits = _rb_ctx_to_hits(ctx)
         self.assertIn("[2026-08-01]", hits[0].content)
 
     def test_inner_os_rendered_as_supplement_not_replacement(self):
-        from voicemem.core import _rb_ctx_to_hits
+        from voicemem_core.core import _rb_ctx_to_hits
         m = _mk_mem(metadata={"inner_os": "【难过】TA 和好友起了冲突"})
         hits = _rb_ctx_to_hits(RightBrainContext(situation_patterns=[m]))
         self.assertIn("和 Lisa 吵架了", hits[0].content)          # 原话在
         self.assertIn("【难过】TA 和好友起了冲突", hits[0].content)  # 内心OS也在
 
     def test_superseded_memory_labeled_and_demoted_but_kept(self):
-        from voicemem.core import _rb_ctx_to_hits
+        from voicemem_core.core import _rb_ctx_to_hits
         old = _mk_mem(metadata={
             "superseded_by": "new-id",
             "superseded_at": "2026-08-10T00:00:00+00:00",
@@ -136,7 +136,7 @@ class HitRankingAndRenderingTests(unittest.TestCase):
         self.assertLess(hits[0].priority, 0.5)                # 降权
 
     def test_current_signals_localized_english(self):
-        from voicemem.core import _rb_ctx_to_hits
+        from voicemem_core.core import _rb_ctx_to_hits
         m = _mk_mem(content="Had a fight with Lisa, feeling awful about it")
         ctx = RightBrainContext(
             situation_patterns=[m],
@@ -152,7 +152,7 @@ class HitRankingAndRenderingTests(unittest.TestCase):
 
     def test_long_raw_content_falls_back_to_inner_os(self):
         # 批量 ingest（20行对话合并）的超长原话不该整段进 prompt
-        from voicemem.core import _rb_ctx_to_hits
+        from voicemem_core.core import _rb_ctx_to_hits
         long_text = "今天发生了很多事。" * 100
         m = _mk_mem(content=long_text, metadata={"inner_os": "【疲惫】TA 这一天很累"})
         hits = _rb_ctx_to_hits(RightBrainContext(situation_patterns=[m]))
@@ -169,7 +169,7 @@ class TextEmotionFallbackTests(unittest.TestCase):
     """
 
     def setUp(self):
-        from voicemem.core import VoiceMem
+        from voicemem_core.core import VoiceMem
         self.tmp = Path(tempfile.mkdtemp())
         self.vm = VoiceMem(memory_root=self.tmp, user_id="u1")
         self.fake_rb_repo = MagicMock()
@@ -182,12 +182,12 @@ class TextEmotionFallbackTests(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _ingest(self, text: str):
-        from voicemem.voice_input import VoiceIngestResult
+        from voicemem_core.voice_input import VoiceIngestResult
         no_fact = VoiceIngestResult(
             voice_id="v1", memory_ids=[], facts_count=0,
             begin_time="12:00:00", end_time="12:00:00", slots=[], messages_count=1,
         )
-        with patch("voicemem.voice_input.ingest_voice_input", return_value=no_fact), \
+        with patch("voicemem_core.voice_input.ingest_voice_input", return_value=no_fact), \
              patch.object(self.vm, "_generate_inner_os", return_value=""), \
              patch.object(self.vm, "_extract_rb_traits", return_value=[]):
             return self.vm.Ingest(
@@ -248,7 +248,7 @@ class AttributionRefineOnceTests(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_refine_runs_once_then_skips(self):
-        from voicemem.rightbrain.attribution_manager import AttributionManager
+        from voicemem_core.rightbrain.attribution_manager import AttributionManager
         mem = self.store.upsert_memory("u1", "heartnote", "今天真的非常非常难受啊")
         graph = MagicMock()
         graph.get_entity.return_value = MagicMock(name="悲伤")
@@ -269,7 +269,7 @@ class CleanupSupersedeTests(unittest.TestCase):
     """_run_cleanup：矛盾 → 标记 supersede 保留；重复 → 删除。"""
 
     def setUp(self):
-        from voicemem.core import VoiceMem
+        from voicemem_core.core import VoiceMem
         self.tmp = Path(tempfile.mkdtemp())
         self.vm = VoiceMem(memory_root=self.tmp, user_id="u1")
         self.rb_store = self.vm._get_rb_repo()._store

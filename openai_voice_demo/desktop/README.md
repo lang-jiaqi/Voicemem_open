@@ -91,6 +91,8 @@ floating transparently).
   territory. The underlying WS protocol/audio logic is the same code as
   the extensively live-tested browser page, so failures are most likely
   window-chrome-level, not conversation-level.
-- No packaging/installer (no `electron-builder` config) -- `npm start`
-  only, dev-mode.
-- No tray icon, no settings window, no mic/speaker device picker.
+- To build a downloadable double-click Mac `.app`/`.dmg` (bundled backend +
+  icon + first-run OPENAI_API_KEY prompt), see **[BUILD.md](BUILD.md)**.
+  `npm start` remains the dev-mode path; packaging adds the self-contained
+  distributable.
+- No tray icon, no mic/speaker device picker.

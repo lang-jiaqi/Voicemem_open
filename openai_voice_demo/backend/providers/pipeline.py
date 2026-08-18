@@ -383,22 +383,32 @@ class PipelineProvider:
                 # clean gap. TARGET_CHUNK_BYTES is even, so every flush stays
                 # sample-aligned; this also smooths out arrival granularity.
                 TARGET_CHUNK_BYTES = 4800  # ~100ms @ 24kHz 16-bit mono
+                tts_failed = False
                 while True:
                     sentence = await sentence_queue.get()
                     if sentence is None:
                         return
+                    # TTS 端点不可用时（如 OpenRouter 没有 /audio/speech）不要打断整轮：
+                    # 关掉本轮语音、继续排空句子队列，让文字回复正常流式完成。
+                    if tts_failed:
+                        continue
                     buf = bytearray()
-                    async with self._client.audio.speech.with_streaming_response.create(
-                        model=self._config.openai_tts_model,
-                        voice=self._config.openai_tts_voice,
-                        input=sentence,
-                        response_format="pcm",
-                    ) as response:
-                        async for audio_chunk in response.iter_bytes():
-                            buf.extend(audio_chunk)
-                            while len(buf) >= TARGET_CHUNK_BYTES:
-                                await ws.send_bytes(bytes(buf[:TARGET_CHUNK_BYTES]))
-                                del buf[:TARGET_CHUNK_BYTES]
+                    try:
+                        async with self._client.audio.speech.with_streaming_response.create(
+                            model=self._config.openai_tts_model,
+                            voice=self._config.openai_tts_voice,
+                            input=sentence,
+                            response_format="pcm",
+                        ) as response:
+                            async for audio_chunk in response.iter_bytes():
+                                buf.extend(audio_chunk)
+                                while len(buf) >= TARGET_CHUNK_BYTES:
+                                    await ws.send_bytes(bytes(buf[:TARGET_CHUNK_BYTES]))
+                                    del buf[:TARGET_CHUNK_BYTES]
+                    except Exception as _e:
+                        tts_failed = True
+                        print(f"  [tts] 本轮语音合成已关闭（endpoint 不可用? {type(_e).__name__}）—— 文字回复不受影响", flush=True)
+                        continue
                     if len(buf) % 2:
                         buf = buf[:-1]  # drop a trailing half-sample byte, if any
                     if buf:

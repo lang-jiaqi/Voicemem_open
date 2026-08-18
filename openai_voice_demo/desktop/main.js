@@ -1,50 +1,79 @@
 /**
- * Minimal Electron wrapper around openai_voice_demo: spawns the existing
- * FastAPI backend (backend/main.py, unchanged) as a child process, opens one
- * window pointed at it, kills the backend on quit. Deliberately does not
- * reuse ../../desktop/ (the separate, more elaborate Electron app that
- * bridges to Qwen/DashScope via gateway/ + a bundled voicemem-core binary,
- * decoupled from the live voicemem_opensource/voicemem source) -- this demo
- * already has its own working, directly-imported voicemem integration and
- * frontend; wrapping it as-is preserves that instead of re-plumbing it
- * through a different stack.
+ * Electron wrapper for the VoiceMem floating orb.
  *
- * This must be run on a machine with a real display, microphone, and
- * speakers -- it was written and syntax-checked on a headless remote server
- * with no attached display (verified `electron --version` runs, that
- * webPreferences/session APIs used below exist in the installed version;
- * NOT verified by actually seeing the window open, since that's impossible
- * here). Run `npm install && npm start` from this directory on your own
- * machine to actually try it.
+ * Two modes, chosen automatically by app.isPackaged:
+ *   · dev (npm start)         — spawns ../backend/main.py via python3, exactly
+ *                               as before. Needs voicemem + deps importable.
+ *   · packaged (.app / .dmg)  — spawns the self-contained backend executable
+ *                               bundled at Resources/backend/voicemem-backend
+ *                               (built with PyInstaller, see BUILD.md). No
+ *                               system Python needed on the user's Mac.
+ *
+ * On first launch (packaged, no key yet) it shows a small window asking for
+ * the user's OPENAI_API_KEY, saved to userData/config.json and passed to the
+ * backend as an env var. The AI itself (GPT reply / TTS / memory extraction)
+ * still calls OpenAI over the network — "local" here means the app runs on
+ * the user's machine, not that it is offline.
  */
-const { app, BrowserWindow, session } = require('electron')
+const { app, BrowserWindow, session, ipcMain } = require('electron')
 const { spawn } = require('child_process')
+const fs = require('fs')
 const path = require('path')
 
 const BACKEND_DIR = path.resolve(__dirname, '..', 'backend')
-// The backend needs voicemem_opensource + its deps importable -- point this
-// at whatever python has that installed (e.g. a conda env's python3) if
-// plain `python3` on PATH isn't it.
 const PYTHON_BIN = process.env.VOICEMEM_PYTHON || 'python3'
 const PORT = process.env.VOICE_DEMO_PORT || '8787'
 const BACKEND_READY_TIMEOUT_MS = 20000
-// SKIP_BACKEND=1: don't spawn a local backend at all -- just open the orb
-// window against an ALREADY-RUNNING backend at localhost:PORT (typically the
-// remote dev server reached through an SSH tunnel: `ssh -L 8788:localhost:8788
-// user@server`, then `VOICE_DEMO_PORT=8788 SKIP_BACKEND=1 npm start`). This is
-// the 5-minute path to a real desktop orb: only Node/Electron needed locally,
-// no Python/models/keys on this machine.
+// SKIP_BACKEND=1: don't spawn any backend, just open the orb against an
+// already-running one at localhost:PORT (dev / remote-tunnel path).
 const SKIP_BACKEND = process.env.SKIP_BACKEND === '1'
+const CONFIG_PATH = path.join(app.getPath('userData'), 'config.json')
 
 let backendProcess = null
 let mainWindow = null
 
-function startBackend() {
-  return new Promise((resolvePromise, reject) => {
-    backendProcess = spawn(PYTHON_BIN, ['main.py'], {
-      cwd: BACKEND_DIR,
-      env: { ...process.env, VOICE_DEMO_PORT: PORT },
+// ── local config (stores the user's OpenAI key) ────────────────────────────
+function loadConfig() {
+  try { return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) } catch { return {} }
+}
+function saveConfig(cfg) {
+  try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2)) } catch (e) {
+    console.error('could not save config:', e)
+  }
+}
+
+// ── first-run key prompt ───────────────────────────────────────────────────
+// Resolves with the entered key, or null if the user closed the window.
+function promptForApiKey() {
+  return new Promise((resolve) => {
+    const win = new BrowserWindow({
+      width: 460, height: 300, resizable: false, title: 'VoiceMem setup',
+      webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
     })
+    win.loadFile(path.join(__dirname, 'setup.html'))
+    let done = false
+    ipcMain.handleOnce('setup:save', (_e, key) => {
+      done = true
+      win.close()
+      resolve((key || '').trim() || null)
+    })
+    win.on('closed', () => { if (!done) resolve(null) })
+  })
+}
+
+// ── backend process ────────────────────────────────────────────────────────
+function spawnBackend(env) {
+  if (app.isPackaged) {
+    // PyInstaller onedir bundle copied in via electron-builder extraResources.
+    const exe = path.join(process.resourcesPath, 'backend', 'voicemem-backend')
+    return spawn(exe, [], { cwd: path.dirname(exe), env })
+  }
+  return spawn(PYTHON_BIN, ['main.py'], { cwd: BACKEND_DIR, env })
+}
+
+function startBackend(env) {
+  return new Promise((resolvePromise, reject) => {
+    backendProcess = spawnBackend({ ...env, VOICE_DEMO_PORT: PORT })
 
     let settled = false
     const finish = (fn, arg) => { if (!settled) { settled = true; fn(arg) } }
@@ -52,8 +81,6 @@ function startBackend() {
     const onOutput = (data) => {
       const text = data.toString()
       process.stdout.write(`[backend] ${text}`)
-      // main.py prints this exact line (backend/main.py) once uvicorn is
-      // actually listening -- the real "ready" signal, not a fixed guess.
       if (/Uvicorn running on/.test(text)) finish(resolvePromise)
     }
     backendProcess.stdout.on('data', onOutput)
@@ -64,19 +91,12 @@ function startBackend() {
       backendProcess = null
       finish(reject, new Error(`backend exited before becoming ready (code ${code})`))
     })
-
-    // Fallback in case the ready-line match above is ever missed (buffering,
-    // wording drift) -- don't hang the app forever, just try loading the URL.
     setTimeout(() => finish(resolvePromise), BACKEND_READY_TIMEOUT_MS)
   })
 }
 
+// ── orb window ─────────────────────────────────────────────────────────────
 function createWindow() {
-  // Floating-orb layout (frontend/orb.html): a transparent, frameless,
-  // always-on-top strip with the orb in the middle and the left-brain /
-  // right-brain memory panels flanking it. Dragging the orb moves the
-  // window (-webkit-app-region: drag on the orb column); the toggle button
-  // and the panels opt out so they stay clickable/scrollable.
   mainWindow = new BrowserWindow({
     width: 1000, height: 420,
     transparent: true, frame: false, alwaysOnTop: true,
@@ -84,30 +104,40 @@ function createWindow() {
     title: 'voicemem orb',
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
   })
-  // ORB_URL=/ to get the classic full debug page instead of the orb.
   mainWindow.loadURL(`http://localhost:${PORT}${process.env.ORB_URL || '/orb.html'}`)
   mainWindow.on('closed', () => { mainWindow = null })
 }
 
+// ── startup ────────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
-  // Electron's default is to prompt (and on some platforms/configs, silently
-  // deny) getUserMedia requests -- explicitly allow media so the mic capture
-  // this demo depends on isn't blocked by an unanswered permission prompt.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
-    callback(permission === 'media')
+    callback(permission === 'media')   // allow mic without an extra prompt
   })
 
+  const config = loadConfig()
+  const env = { ...process.env }
+
   if (!SKIP_BACKEND) {
+    // Need an OpenAI key. Prefer env, then saved config, else ask once.
+    let key = process.env.OPENAI_API_KEY || config.OPENAI_API_KEY
+    if (!key) {
+      key = await promptForApiKey()
+      if (!key) { app.quit(); return }       // user cancelled setup
+      config.OPENAI_API_KEY = key
+      saveConfig(config)
+    }
+    env.OPENAI_API_KEY = key
+
     try {
-      await startBackend()
+      await startBackend(env)
     } catch (err) {
       console.error('Failed to start backend:', err)
       app.quit()
       return
     }
   }
-  createWindow()
 
+  createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -117,7 +147,6 @@ app.on('window-all-closed', () => {
   if (backendProcess) backendProcess.kill()
   if (process.platform !== 'darwin') app.quit()
 })
-
 app.on('before-quit', () => {
   if (backendProcess) backendProcess.kill()
 })

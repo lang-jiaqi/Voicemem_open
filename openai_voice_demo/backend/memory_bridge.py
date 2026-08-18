@@ -10,7 +10,7 @@ import uuid
 
 from config import Config
 
-from voicemem import VoiceMem, SearchResult
+from voicemem_core import VoiceMem, SearchResult
 
 from audio_utils import write_wav_file
 from local_classifier import LocalSlotClassifier
@@ -66,6 +66,11 @@ class MemoryBridge:
             enable_emotion=config.audio_native,
             embedder=local_embedder,
         )
+
+    @property
+    def vm(self) -> VoiceMem:
+        """底层 VoiceMem 实例（供启动自检 startup_check 复用同一实例测速）。"""
+        return self._vm
 
     async def search(self, query: str, **kwargs) -> SearchResult:
         # voicemem's own canonical pattern (see VoiceMem.PrimeSubgraphFromQuery
@@ -194,4 +199,7 @@ class MemoryBridge:
                 for h in getattr(result, "rb_hits", None) or []
             ],
             "current_scene": getattr(result, "current_scene", None) or None,
+            # 每个 slot 的会话级概括性摘要（voicemem 维护的 slot_summaries）——
+            # 前端用作簇标签的悬停描述。{slot: summary_text}
+            "related_summaries": getattr(result, "related_summaries", None) or {},
         }

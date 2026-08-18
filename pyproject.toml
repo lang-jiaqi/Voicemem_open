@@ -73,4 +73,8 @@ service = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["voicemem*"]
+include = ["voicemem_core*"]
+
+# 引擎是 voicemem_core 包；voicemem.py 是顶层「前台」模块（import voicemem 即得）。
+[tool.setuptools]
+py-modules = ["voicemem"]

@@ -1,0 +1,1142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>VoiceMem — memory graph</title>
+<style>
+  :root{
+    --ink:#f2f4f8;
+    --dim:#7d8496;
+    --line:rgba(255,255,255,.14);
+    --blue:#4aa8f0;
+    --rose:#ff3d8b;
+    --violet:#a583ff;
+    --mint:#58e08d;
+    --pink:#ff5fa2;
+    --amber:#ff9a3c;
+    --leaf:#4ade80;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:#000;color:var(--ink);
+    font-family:var(--mono);
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  #shell{position:fixed;inset:0;display:flex;flex-direction:column;padding:18px clamp(14px,3vw,40px) 14px}
+
+  /* ---------- masthead ---------- */
+  header{display:flex;align-items:center;gap:18px;flex:0 0 auto}
+  header .rule{flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--line) 22%,var(--line) 78%,transparent)}
+  header h1{
+    margin:0;font-weight:400;font-size:clamp(19px,2.3vw,29px);
+    letter-spacing:.42em;text-indent:.42em;white-space:nowrap;
+    color:#fff;text-shadow:0 0 26px rgba(180,205,255,.35);
+  }
+
+  /* ---------- stage ---------- */
+  main{flex:1 1 auto;position:relative;display:flex;align-items:center;justify-content:center;min-height:0}
+  #stage{position:relative;width:100%;height:100%}
+  #brain{
+    position:absolute;inset:0;width:100%;height:100%;
+    object-fit:contain;mix-blend-mode:screen;
+    filter:brightness(.92) contrast(1.06);
+    opacity:0;transition:opacity 1.4s ease .1s;
+    pointer-events:none;user-select:none;
+  }
+  #brain.in{opacity:1}
+  #fx{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+
+  /* ---------- hemisphere legends ---------- */
+  .side{
+    position:absolute;top:50%;transform:translateY(-50%);
+    display:flex;flex-direction:column;gap:30px;z-index:3;
+    pointer-events:auto;
+  }
+  .side.l{left:clamp(6px,2vw,34px);align-items:flex-start}
+  .side.r{right:clamp(6px,2vw,34px);align-items:flex-end}
+  .side h2{
+    margin:0 0 4px;font-family:var(--serif);font-style:italic;font-weight:400;
+    font-size:clamp(13px,1.35vw,18px);letter-spacing:.01em;color:#e8ecf5;white-space:nowrap;
+  }
+  .side.l h2 em{font-style:italic;color:#7fb2e8}
+  .side.r h2 em{font-style:italic;color:#e879a8}
+  .key{
+    display:flex;align-items:center;gap:9px;cursor:default;
+    font-family:var(--serif);font-style:italic;font-size:13px;color:var(--dim);
+    transition:color .35s ease,opacity .35s ease;padding:3px 0;
+  }
+  .side.r .key{flex-direction:row-reverse}
+  .key:hover{color:#fff}
+  .key .g{width:11px;height:11px;flex:0 0 11px;opacity:.85;transition:transform .35s cubic-bezier(.2,.8,.2,1)}
+  .key:hover .g{transform:scale(1.35)}
+  .key .g svg{display:block;overflow:visible}
+
+  /* ---------- memory card ---------- */
+  #card{
+    position:absolute;left:0;top:0;width:214px;z-index:5;
+    border:1px solid rgba(255,255,255,.82);
+    background:rgba(4,5,8,.80);
+    backdrop-filter:blur(9px) saturate(120%);
+    -webkit-backdrop-filter:blur(9px) saturate(120%);
+    padding:11px 12px 10px;
+    opacity:0;transform:translate3d(-999px,-999px,0) scale(.97);
+    transition:opacity .22s ease,transform .22s cubic-bezier(.2,.8,.2,1);
+    will-change:transform,opacity;pointer-events:none;
+    box-shadow:0 0 0 1px rgba(0,0,0,.9),0 18px 50px -18px rgba(0,0,0,1);
+  }
+  #card.on{opacity:1}
+  #card .eb{display:flex;align-items:center;gap:7px;margin-bottom:9px}
+  #card .sw{width:7px;height:7px;border:1.4px solid #fff;flex:0 0 7px}
+  #card .kd{font-size:9.5px;letter-spacing:.24em;color:#fff;text-transform:uppercase}
+  #card .id{margin-left:auto;font-size:9.5px;letter-spacing:.1em;color:#6c7382}
+  #card .cbody{font-family:var(--serif);font-size:12px;line-height:1.45;color:#dfe4ee;
+    margin-bottom:10px;max-height:96px;overflow:auto;word-break:break-word}
+  #card .bars{display:flex;flex-direction:column;gap:6px;margin-bottom:11px}
+  #card .bars i{
+    display:block;height:6px;border-radius:1px;
+    background:linear-gradient(90deg,rgba(255,255,255,.07),rgba(255,255,255,.16),rgba(255,255,255,.07));
+    background-size:220% 100%;animation:sweep 2.6s linear infinite;
+  }
+  #card .bars i:nth-child(2){animation-delay:.18s}
+  #card .bars i:nth-child(3){animation-delay:.36s}
+  @keyframes sweep{from{background-position:120% 0}to{background-position:-120% 0}}
+  #card .ft{
+    display:flex;justify-content:space-between;font-size:9px;letter-spacing:.14em;
+    color:#5d6472;border-top:1px solid rgba(255,255,255,.14);padding-top:7px;
+  }
+
+  /* ---------- footer ---------- */
+  footer{flex:0 0 auto;margin-top:10px}
+  .ticks{
+    height:9px;
+    background:repeating-linear-gradient(90deg,var(--line) 0 1px,transparent 1px 11px);
+    -webkit-mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);
+    mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);
+    opacity:.75;
+  }
+  .facts{display:flex;justify-content:space-around;gap:10px;padding-top:9px;flex-wrap:wrap}
+  .facts span{font-size:11px;color:#9aa1b0;letter-spacing:.05em;white-space:nowrap}
+  .facts b{font-weight:400;color:#e6eaf2}
+  .facts em{font-family:var(--serif);font-style:italic;color:#9aa1b0}
+
+  .hint{
+    position:absolute;left:50%;bottom:6px;transform:translateX(-50%);
+    font-size:10px;letter-spacing:.2em;color:#4d545f;z-index:4;
+    animation:fade 6s ease 3.4s forwards;pointer-events:none;
+  }
+  @keyframes fade{to{opacity:0}}
+
+  @media (max-width:900px){
+    .side{display:none}
+    header h1{letter-spacing:.3em;text-indent:.3em}
+    #card{width:186px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    #card .bars i{animation:none}
+    .hint{animation:none}
+  }
+
+  /* ===================== 3-column app layout ===================== */
+  #app{
+    position:fixed;inset:0;display:grid;
+    grid-template-columns:var(--rail-w,236px) minmax(200px,1fr) minmax(62%,2fr);
+    grid-template-rows:minmax(0,1fr);
+    transition:grid-template-columns .32s cubic-bezier(.2,.8,.2,1);
+  }
+  #app.rail-collapsed{--rail-w:46px}
+
+  /* ① leftmost collapsible memory rail */
+  .rail{position:relative;min-height:0;display:flex;flex-direction:column;
+    border-right:1px solid var(--line);background:rgba(6,8,12,.55)}
+  .rail-top{flex:0 0 auto;display:flex;align-items:center;gap:9px;
+    padding:16px 12px 12px;border-bottom:1px solid var(--line)}
+  .rail-top h1{margin:0;font-weight:400;font-size:15px;letter-spacing:.32em;
+    color:#fff;white-space:nowrap;text-shadow:0 0 22px rgba(180,205,255,.35);transition:opacity .2s}
+  .rail-toggle{margin-left:auto;width:24px;height:24px;flex:0 0 24px;border:1px solid var(--line);
+    background:transparent;color:#9aa1b0;border-radius:6px;cursor:pointer;font-size:15px;
+    line-height:1;display:flex;align-items:center;justify-content:center}
+  .rail-toggle:hover{color:#fff;border-color:rgba(255,255,255,.4)}
+  .rail-body{flex:1;overflow:auto;padding:14px 14px 24px;transition:opacity .2s}
+  #app.rail-collapsed .rail-body,#app.rail-collapsed .rail-top h1{opacity:0;pointer-events:none}
+  .rail-sec{margin:4px 0 16px}
+  .rail-sec>h2{margin:0 0 6px;font-family:var(--serif);font-style:italic;font-weight:400;font-size:13.5px}
+  .rail-sec.l>h2 em{color:#7fb2e8;font-style:italic}
+  .rail-sec.r>h2 em{color:#e879a8;font-style:italic}
+  .cat{display:flex;align-items:center;gap:8px;margin:11px 0 5px;cursor:default;
+    font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#c7cdd9}
+  .cat .dot{width:9px;height:9px;flex:0 0 9px;border-radius:2px;background:var(--c);box-shadow:0 0 8px var(--c)}
+  .cat .n{margin-left:auto;font-size:10px;letter-spacing:.05em;color:#5d6472}
+  ul.mem{list-style:none;margin:0 0 2px;padding:0}
+  ul.mem li{font-family:var(--serif);font-size:12.5px;line-height:1.4;color:#9aa1b0;
+    padding:4px 0 4px 15px;margin-left:3px;border-left:1px solid var(--line)}
+  ul.mem li:hover{color:#e6eaf2;border-left-color:rgba(255,255,255,.4)}
+  ul.mem li.you{color:#d0b3ff;border-left-color:var(--violet);font-style:italic}
+  ul.mem li.new{animation:memin .5s ease}
+  @keyframes memin{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:none}}
+
+  /* ② middle column: three stacked blocks */
+  .center{display:flex;flex-direction:column;gap:12px;min-width:0;min-height:0;padding:16px 14px}
+  .block{border:1px solid var(--line);border-radius:11px;background:rgba(6,8,12,.5);
+    padding:13px 15px;display:flex;flex-direction:column;min-height:0}
+  .block-h{flex:0 0 auto;display:flex;align-items:center;gap:9px;margin-bottom:10px;
+    font-size:10px;letter-spacing:.24em;text-transform:uppercase;color:#7d8496}
+  .block-h::after{content:"";flex:1;height:1px;background:var(--line)}
+  .io-in{flex:0 0 auto}.recall{flex:1 1 auto;min-height:0}.io-out{flex:0 0 auto}
+  .live-text{font-family:var(--serif);font-size:15px;line-height:1.5;color:#eef1f7;min-height:23px}
+  .textin{width:100%;box-sizing:border-box;margin-top:10px;font-size:13px;padding:8px 10px;
+    border:1px solid var(--line);border-radius:8px;background:#12151b;color:#e8ecf5;font-family:var(--serif)}
+  .textin:focus{outline:none;border-color:rgba(74,168,240,.5)}
+  .live-text .caret{display:inline-block;width:7px;height:15px;vertical-align:-2px;margin-left:2px;
+    background:var(--blue);animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+  .tags{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px;min-height:24px}
+  .tag{font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);color:#c7cdd9;white-space:nowrap}
+  .tag b{font-weight:400;opacity:.55;margin-right:6px}
+  .tag.emo{border-color:rgba(255,95,162,.45);color:#ff9dc4}
+  .tag.ent{border-color:rgba(74,168,240,.45);color:#9fd0ff}
+  .tag.sch{border-color:rgba(88,224,141,.45);color:#8ce9b3}
+  .recall-cols{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .rc{display:flex;flex-direction:column;min-height:0}
+  .rc-h{flex:0 0 auto;font-size:11px;letter-spacing:.1em;margin-bottom:7px}
+  .rc.l .rc-h{color:#7fb2e8}.rc.r .rc-h{color:#e879a8}
+  .rc ul{list-style:none;margin:0;padding:0;overflow:auto;flex:1;min-height:0}
+  .rc li{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;color:#aeb4c2;
+    padding:6px 0;border-bottom:1px dashed var(--line);line-height:1.35}
+  .rc li .sc{flex:0 0 auto;color:#5d6472;font-variant-numeric:tabular-nums;font-size:11px}
+  .reply{flex:1;min-height:42px;overflow:auto;font-family:var(--serif);font-size:15px;line-height:1.55;color:#eef1f7}
+  .io-foot{flex:0 0 auto;display:flex;align-items:center;gap:12px;margin-top:11px;padding-top:10px;border-top:1px solid var(--line)}
+  .talk{margin-left:auto;font-size:12.5px;padding:7px 16px;border-radius:999px;cursor:pointer;
+    border:1px solid rgba(74,168,240,.5);background:rgba(74,168,240,.12);color:#9fd0ff;letter-spacing:.05em}
+  .talk:hover{background:rgba(74,168,240,.22);color:#fff}
+  .talk.live{border-color:rgba(255,95,162,.55);background:rgba(255,95,162,.14);color:#ff9dc4}
+
+  /* voice indicator: waveform when AI speaks / ear when user speaks */
+  .voice{display:flex;align-items:center;gap:11px;height:30px}
+  .voice .lab{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:#6c7382}
+  .voice #wave{display:none;width:150px;height:30px}
+  .voice.ai #wave{display:block}
+  .voice.ai .lab{color:#8ce9b3}
+  .voice.user .lab{color:#9fd0ff}
+  .ear-wrap{position:relative;width:26px;height:26px;display:none}
+  .voice.user .ear-wrap{display:block}
+  .ear-wrap .ring{position:absolute;inset:0;border:1px solid rgba(159,208,255,.5);border-radius:50%;
+    animation:earpulse 1.6s ease-out infinite}
+  @keyframes earpulse{0%{transform:scale(.55);opacity:.85}100%{transform:scale(1.5);opacity:0}}
+
+  /* ③ brain column (center-right) */
+  .brainwrap{position:relative;min-width:0;min-height:0;overflow:hidden}
+
+  @media (max-width:820px){
+    #app{grid-template-columns:1fr;grid-template-rows:auto auto 1fr;overflow:auto}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ① 最左：可收起/展开的记忆栏板（左脑 + 右脑，按类别分好）-->
+  <aside class="rail">
+    <div class="rail-top">
+      <h1>VoiceMem</h1>
+      <button class="rail-toggle" id="railToggle" title="收起 / 展开">‹</button>
+    </div>
+    <div class="rail-body">
+      <section class="rail-sec l">
+        <h2><em>Informative</em> · 左脑记忆（SlotV2 槽位）</h2>
+        <div class="cat" data-slot="work" style="--c:var(--blue)"><span class="dot"></span>work<span class="n" id="cnt-work">0</span></div>
+        <ul class="mem" id="mem-work"></ul>
+        <div class="cat" data-slot="finance" style="--c:var(--amber)"><span class="dot"></span>finance<span class="n" id="cnt-finance">0</span></div>
+        <ul class="mem" id="mem-finance"></ul>
+        <div class="cat" data-slot="relationships" style="--c:var(--violet)"><span class="dot"></span>relationships<span class="n" id="cnt-relationships">0</span></div>
+        <ul class="mem" id="mem-relationships"><li class="you">你 · owner（this account）</li></ul>
+        <div class="cat" data-slot="health" style="--c:var(--mint)"><span class="dot"></span>health<span class="n" id="cnt-health">0</span></div>
+        <ul class="mem" id="mem-health"></ul>
+        <div class="cat" data-slot="goals" style="--c:var(--leaf)"><span class="dot"></span>goals<span class="n" id="cnt-goals">0</span></div>
+        <ul class="mem" id="mem-goals"></ul>
+        <div class="cat" data-slot="daily_life" style="--c:#7fb2e8"><span class="dot"></span>daily_life<span class="n" id="cnt-daily_life">0</span></div>
+        <ul class="mem" id="mem-daily_life"></ul>
+        <div class="cat" data-slot="knowledge" style="--c:#58e08d"><span class="dot"></span>knowledge<span class="n" id="cnt-knowledge">0</span></div>
+        <ul class="mem" id="mem-knowledge"></ul>
+      </section>
+      <section class="rail-sec r">
+        <h2><em>Emotional</em> · 右脑记忆</h2>
+        <div class="cat" style="--c:var(--pink)"><span class="dot"></span>emotion<span class="n" id="cnt-emotion">0</span></div>
+        <ul class="mem" id="mem-emotion"></ul>
+        <div class="cat" style="--c:var(--amber)"><span class="dot"></span>experiences<span class="n" id="cnt-experiences">0</span></div>
+        <ul class="mem" id="mem-experiences"></ul>
+        <div class="cat" style="--c:var(--leaf)"><span class="dot"></span>preference<span class="n" id="cnt-preference">0</span></div>
+        <ul class="mem" id="mem-preference"></ul>
+      </section>
+    </div>
+  </aside>
+
+  <!-- ② 中间：上下三块 -->
+  <section class="center">
+    <!-- 上：每轮流式输入 + 情绪/实体/schema 标签 -->
+    <div class="block io-in">
+      <div class="block-h">流式输入 · Live input</div>
+      <div class="live-text" id="liveInput">…</div>
+      <input id="textIn" class="textin" placeholder="或直接打字回车测试（无需麦克风/ASR 模型）" />
+      <div class="tags" id="tags">
+        <span class="tag emo"><b>emotion</b>焦虑</span>
+        <span class="tag ent"><b>entity</b>Alex</span>
+        <span class="tag sch"><b>schema</b>food</span>
+      </div>
+    </div>
+    <!-- 中：左右脑分别召回 top-k -->
+    <div class="block recall">
+      <div class="block-h">Top-K 召回 · left / right</div>
+      <div class="recall-cols">
+        <div class="rc l">
+          <div class="rc-h">左脑 · 事实</div>
+          <ul id="recallL">
+            <li><span>上次也在这家拉面店吃过</span><span class="sc">0.82</span></li>
+            <li><span>Alex 是同组同事</span><span class="sc">0.77</span></li>
+            <li><span>今天下午有季度评审</span><span class="sc">0.71</span></li>
+          </ul>
+        </div>
+        <div class="rc r">
+          <div class="rc-h">右脑 · 画像</div>
+          <ul id="recallR">
+            <li><span>评审场景常伴随焦虑</span><span class="sc">0.79</span></li>
+            <li><span>偏好清汤、口味清淡</span><span class="sc">0.68</span></li>
+            <li><span>压力大时喜欢被安抚</span><span class="sc">0.61</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <!-- 下：流式 AI 回复 + 语音指示器 -->
+    <div class="block io-out">
+      <div class="block-h">AI 回复 · Reply</div>
+      <div class="reply" id="reply">…</div>
+      <div class="io-foot">
+        <div class="voice" id="voice">
+          <div class="ear-wrap"><span class="ring"></span>
+            <svg class="ear" width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="#9fd0ff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 17.6c-1.7-1.2-2.7-3.2-2.7-5.5C6.3 8.7 8.9 6.3 12.2 6.3c3.1 0 5.4 2.1 5.4 5 0 2.1-1.6 3-2.7 4.1-.8.8-.6 2-1.6 2.8-1 .8-2.4.4-2.7-.7"/>
+              <path d="M10.7 12.4c.3-1.4 1.7-2.2 3-1.7"/>
+            </svg>
+          </div>
+          <canvas id="wave"></canvas>
+          <span class="lab" id="voiceLab">idle</span>
+        </div>
+        <button class="talk" id="talkBtn">开始对话</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ③ 脑图（中间偏右）-->
+  <section class="brainwrap">
+    <div id="stage">
+      <img id="brain" alt="" src="./images/background.png" />
+      <canvas id="fx"></canvas>
+      <div id="card" aria-hidden="true">
+        <div class="eb"><span class="sw" id="c-sw"></span><span class="kd" id="c-kd">entity</span><span class="id" id="c-id">#0000</span></div>
+        <div class="cbody" id="c-body">…</div>
+        <div class="ft"><span id="c-src">voice · 00:00</span><span>— — —</span></div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+(function(){
+const G = {"nodes":[{"x":0.3379,"y":0.2,"k":"label","r":0,"w":"work"},{"x":0.2616,"y":0.3829,"k":"label","r":0,"w":"health"},{"x":0.2507,"y":0.6057,"k":"label","r":0,"w":"relationships"},{"x":0.1199,"y":0.4914,"k":"label","r":0,"w":"finance"},{"x":0.1226,"y":0.7029,"k":"label","r":0,"w":"goals"},{"x":0.2016,"y":0.8171,"k":"label","r":0,"w":"daily_life"},{"x":0.3324,"y":0.7657,"k":"label","r":0,"w":"knowledge"},{"x":0.77,"y":0.3,"k":"label","r":0,"w":"emotion"},{"x":0.6,"y":0.47,"k":"label","r":0,"w":"experiences"},{"x":0.8,"y":0.66,"k":"label","r":0,"w":"preference"},{"x":0.3515,"y":0.6057,"k":"user","r":8.4,"w":"you"}],"links":[{"a":10,"b":0,"t":"in","w":0.3},{"a":10,"b":1,"t":"in","w":0.3},{"a":10,"b":2,"t":"in","w":0.3},{"a":10,"b":3,"t":"in","w":0.3},{"a":10,"b":4,"t":"in","w":0.3},{"a":10,"b":5,"t":"in","w":0.3},{"a":10,"b":6,"t":"in","w":0.3},{"a":10,"b":7,"t":"in","w":0.3},{"a":10,"b":8,"t":"in","w":0.3},{"a":10,"b":9,"t":"in","w":0.3}]};
+
+/* ---- fitting the graph onto whatever plate is supplied ----------------
+   The layout was authored on a reference plate; on load we measure the
+   cortex in the actual background image and scale the graph to match.
+   scale: shrink/grow the whole graph   dx/dy: nudge it (1 = plate width)
+   rightShift: move right-brain nodes horizontally (0.02 = 2% plate width) */
+const CFG = { fit:true, scale:1.77, dx:0, dy:0, rightShift:0.02, maxStretch:1.3 };
+const P  = 0.953;                                   // reference plate h/w
+const MY = {
+  x0:0.0219, x1:0.9688, y0:0.0361, y1:0.9475, mid:0.4906,
+  L:{ x0:0.0219, x1:0.4688, y0:0.0361, y1:0.9475 },
+  R:{ x0:0.5094, x1:0.9688, y0:0.0361, y1:0.9475 }
+};
+let DET = null;
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const stage = document.getElementById('stage');
+const cv    = document.getElementById('fx');
+const ctx   = cv.getContext('2d', {alpha:true});
+const card  = document.getElementById('card');
+const cKd   = document.getElementById('c-kd');
+const cId   = document.getElementById('c-id');
+const cSw   = document.getElementById('c-sw');
+const cSrc  = document.getElementById('c-src');
+const cBody = document.getElementById('c-body');
+
+// SlotV2 簇的简短描述（悬停簇标签时显示；键为 label 的 w）
+const SLOT_DESC = {
+  work:'工作 · 职业/公司/项目/同事/会议/汇报',
+  finance:'财务 · 收入/薪资/投资/支出/存款/理财',
+  relationships:'人际 · 家人/朋友/感情/社交',
+  health:'健康 · 运动/饮食/睡眠/身体/情绪/压力',
+  goals:'目标 · 计划/梦想/未来/成长/自我提升',
+  daily_life:'日常 · 爱好/习惯/娱乐/生活方式',
+  knowledge:'知识 · 学习/技能/概念/技术/研究',
+  emotion:'情绪 · 当前及历史的情感倾向',
+  experiences:'经历 · 值得记住的事件与回应经验',
+  preference:'偏好 · 沟通与内容上的个人偏好',
+};
+const brain = document.getElementById('brain');
+
+const PAL = {
+  hub:'#ff3d8b', core:'#62c8ff', entity:'#4aa8f0', person:'#a583ff',
+  know:'#58e08d', emotion:'#ff5fa2', exper:'#ff9a3c', prefer:'#4ade80',
+  label:'#ffffff', user:'#d02fa8'
+};
+const MONOF = getComputedStyle(document.body).fontFamily;
+const LABEL = {
+  hub:'Core Index', core:'Entity Cluster', entity:'Entity', person:'Person',
+  know:'Knowledge', emotion:'Emotion', exper:'Experience', prefer:'Preference',
+  label:'Cluster', user:'You · owner'
+};
+const SRC = {
+  hub:'index · rebuilt', core:'cluster · 12 refs', entity:'voice · 00:',
+  person:'voice · 00:', know:'derived · note', emotion:'valence · —',
+  exper:'episode · 00:', prefer:'inferred · —',
+  label:'cluster · ', user:'identity · anchor'
+};
+const GROUP = { entity:['entity','core','hub'], person:['person','user'], know:['know'],
+                emotion:['emotion'], exper:['exper'], prefer:['prefer'] };
+
+/* ---------- node runtime ---------- */
+const N = G.nodes.map((n,i)=>({
+  bx:n.x, by:n.y, side:(n.x < MY.mid ? 'L' : 'R'), sx:0, sy:0,
+  k:n.k, r:n.r, c:n.c, w:n.w||'', bw:0, bh:0,
+  ph:Math.random()*Math.PI*2, ph2:Math.random()*Math.PI*2,
+  sp:0.28+Math.random()*0.42, ax:0.55+Math.random()*0.9, ay:0.55+Math.random()*0.9,
+  x:0, y:0, h:0, p:0, f:1, iv:0, id:i,
+  dl: 0.35 + n.x*1.05 + (n.k==='hub'?-0.3:0)
+}));
+const L = G.links;
+const CROSS = L.filter(l=>l.t==='cross').map(l=>({l}));
+const USER = N.findIndex(n=>n.k==='user');
+const PULSE = { t:-0.6, dur:2.3, gap:1.9, trail:0.30, seg:30 };
+const ADJ = N.map(()=>[]);
+const NB  = N.map(()=>[]);
+L.forEach((l,i)=>{ ADJ[l.a].push(i); ADJ[l.b].push(i); NB[l.a].push(l.b); NB[l.b].push(l.a); });
+N.forEach((n,i)=>{ n.cnt = L.reduce((s,l)=> s + ((l.t==='in' && l.a===i)?1:0), 0); });
+
+const LSTYLE = {
+  in:    ['rgba(150,192,235,',0.19,0.75],
+  box:   ['rgba(171,133,255,',0.46,2.30],
+  spine: ['rgba(232,240,255,',0.26,0.90],
+  spoke: ['rgba(186,212,246,',0.13,0.70],
+  field: ['rgba(255,170,200,',0.17,0.80],
+  cross: ['rgba(214,228,255,',0.20,1.45]
+};
+
+/* ---------- sizing ---------- */
+let W=0,H=0,S=1,DPR=1,IW=0,IH=0,OX=0,OY=0,K=1,CX=0,CY=0;
+let AR = 1000/953;       // overwritten by the plate's own ratio once loaded
+function resize(){
+  const r = stage.getBoundingClientRect();
+  W = r.width; H = r.height;
+  DPR = Math.min(2, window.devicePixelRatio||1);
+  cv.width = Math.round(W*DPR); cv.height = Math.round(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  IW = W; IH = W/AR;                       // letterbox exactly like object-fit:contain
+  if(IH > H){ IH = H; IW = H*AR; }
+  OX = (W-IW)/2; OY = (H-IH)/2;
+  // one uniform transform for the whole graph, so the two halves keep the
+  // spacing they were drawn with; the scale is capped by the narrower
+  // hemisphere of the supplied plate so nothing spills past the outline
+  const d = (CFG.fit && DET) ? DET : MY;
+  let s = Infinity;
+  for(const side of ['L','R'])
+    s = Math.min(s, ((d[side].x1-d[side].x0)*IW) / (MY[side].x1-MY[side].x0));
+  s = Math.min(s, ((d.y1-d.y0)*IH) / ((MY.y1-MY.y0)*P));
+  K = s * CFG.scale;  S = K/1000;
+  CX = OX + ((d.x0+d.x1)/2)*IW + CFG.dx*K;
+  CY = OY + ((d.y0+d.y1)/2)*IH + CFG.dy*K;
+  const mcx = (MY.x0+MY.x1)/2, mcy = (MY.y0+MY.y1)/2;
+  for(const n of N){
+    n.sx = CX + (n.bx-mcx)*K + (n.side==='R' ? CFG.rightShift*IW : 0);
+    n.sy = CY + (n.by-mcy)*P*K;
+  }
+  // 背景脑图跟着 CFG.scale 一起缩放（绕脑轮廓中心），和节点图谱同步放大、保持对齐
+  const pcx=(d.x0+d.x1)/2, pcy=(d.y0+d.y1)/2;
+  brain.style.transformOrigin = ((OX+pcx*IW)/W*100)+'% '+((OY+pcy*IH)/H*100)+'%';
+  brain.style.transform = 'translate('+(CFG.dx*K).toFixed(1)+'px,'+(CFG.dy*K).toFixed(1)+'px) scale('+CFG.scale+')';
+  buildGlow();
+}
+new ResizeObserver(resize).observe(stage);
+
+/* ---------- pre-rendered glow sprites ---------- */
+const GLOW = {};
+function buildGlow(){
+  for(const k in PAL){
+    if(k==='label') continue;
+    const R = Math.max(18, Math.round((k==='user'? 150 : 56)*S));
+    const c = document.createElement('canvas');
+    c.width = c.height = R*2;
+    const g = c.getContext('2d');
+    const rg = g.createRadialGradient(R,R,0,R,R,R);
+    const col = PAL[k];
+    rg.addColorStop(0,   hexa(col,.55));
+    rg.addColorStop(.28, hexa(col,.20));
+    rg.addColorStop(.62, hexa(col,.05));
+    rg.addColorStop(1,   hexa(col,0));
+    g.fillStyle = rg; g.fillRect(0,0,R*2,R*2);
+    GLOW[k] = c;
+  }
+}
+function hexa(h,a){
+  const n = parseInt(h.slice(1),16);
+  return 'rgba('+(n>>16)+','+(n>>8&255)+','+(n&255)+','+a+')';
+}
+
+/* ---------- pointer ---------- */
+let mx=-9999, my=-9999, has=false, sel=-1, selPrev=-1;
+let cardX=0, cardY=0, cardTX=0, cardTY=0, cardSide=1, cardShown=false;
+stage.addEventListener('pointermove', e=>{
+  const r = cv.getBoundingClientRect();
+  mx = e.clientX-r.left; my = e.clientY-r.top; has = true;
+}, {passive:true});
+stage.addEventListener('pointerdown', e=>{
+  const r = cv.getBoundingClientRect();
+  mx = e.clientX-r.left; my = e.clientY-r.top; has = true;
+}, {passive:true});
+stage.addEventListener('pointerleave', ()=>{ has=false; mx=my=-9999; }, {passive:true});
+
+/* ---------- legend focus ---------- */
+let focus = null;
+document.querySelectorAll('.key').forEach(el=>{
+  const set = v => { focus = v; document.querySelectorAll('.key').forEach(o=>o.style.opacity = (v && o!==el) ? .38 : 1); };
+  el.addEventListener('pointerenter', ()=>set(el.dataset.k));
+  el.addEventListener('pointerleave', ()=>set(null));
+});
+
+/* ---------- loop ---------- */
+let t0 = performance.now(), tPrev = t0;
+function frame(now){
+  const t = (now-t0)/1000;
+  const dt = Math.min(0.05, (now-tPrev)/1000); tPrev = now;
+  ctx.clearRect(0,0,W,H);
+
+  // intro sweep
+  for(const n of N){
+    const u = Math.min(1, Math.max(0, (t-n.dl)/0.75));
+    n.iv = 1-Math.pow(1-u,3);
+  }
+
+  // positions
+  const amp = REDUCED ? 0 : 3.1*S;
+  for(const n of N){
+    n.x = n.sx + Math.sin(t*n.sp + n.ph)*amp*n.ax;
+    n.y = n.sy + Math.cos(t*n.sp*0.83 + n.ph2)*amp*n.ay;
+  }
+
+  // nearest node to cursor
+  let best=-1, bd=1e9;
+  if(has){
+    for(const n of N){
+      let d;
+      if(n.k==='label' && n.bw){
+        const dx=Math.max(Math.abs(n.x-mx)-n.bw/2,0), dy=Math.max(Math.abs(n.y-my)-n.bh/2,0);
+        d = Math.hypot(dx,dy);
+      } else {
+        d = Math.max(0, Math.hypot(n.x-mx, n.y-my) - n.r*2.0*S*0.85);
+      }
+      if(d<bd){ bd=d; best=n.id; }
+    }
+    if(bd > Math.max(24, 40*S)) best = -1;
+  }
+  sel = best;
+
+  // per-node easing — everything wired to the hovered node lifts with it
+  const fieldR = 150*S;
+  const lit = new Set(sel>=0 ? NB[sel] : []);
+  for(const n of N){
+    const tgtH = Math.max((n.id===sel) ? 1 : (lit.has(n.id) ? 0.42 : 0), n.act||0);
+    n.h += (tgtH-n.h) * (tgtH ? .22 : .10);
+    let p = 0;
+    if(has){
+      const d = Math.hypot(n.x-mx, n.y-my);
+      p = d<fieldR ? (1-d/fieldR) : 0;  p *= p;
+    }
+    n.p += (p-n.p)*.14;
+    const tgtF = (!focus || n.k==='label' || GROUP[focus].indexOf(n.k)>=0) ? 1 : .16;
+    n.f += (tgtF-n.f)*.12;
+  }
+
+  /* links */
+  ctx.lineCap = 'round';
+  for(const l of L){
+    const a=N[l.a], b=N[l.b];
+    const st = LSTYLE[l.t] || LSTYLE.in;
+    const lift = Math.max(a.h,b.h)*.38 + Math.max(a.p,b.p)*.14;
+    const fade = Math.min(a.f,b.f);
+    const al = (st[1]*(l.w||1) + lift) * fade * Math.min(a.iv,b.iv);
+    if(al<=0.006) continue;
+    ctx.strokeStyle = st[0]+al.toFixed(3)+')';
+    ctx.lineWidth = (st[2]*(1+lift*1.5))*Math.max(.72,S);
+    ctx.beginPath();
+    ctx.moveTo(a.x,a.y);
+    if(l.t==='cross'){
+      const c = ctl(a,b); ctx.quadraticCurveTo(c[0],c[1],b.x,b.y);
+    } else ctx.lineTo(b.x,b.y);
+    ctx.stroke();
+  }
+
+  /* one synchronised pulse of light runs every callosum strand */
+  if(!REDUCED){
+    PULSE.t += dt/PULSE.dur;
+    if(PULSE.t > 1 + PULSE.trail) PULSE.t = -PULSE.gap/PULSE.dur;
+    if(PULSE.t > -PULSE.trail){
+      ctx.globalCompositeOperation='lighter';
+      ctx.lineCap='round'; ctx.lineJoin='round';
+      const STEP = PULSE.trail/PULSE.seg;
+      for(const p of CROSS){
+        const a=N[p.l.a], b=N[p.l.b], c=ctl(a,b);
+        const f = Math.min(a.f,b.f)*Math.min(a.iv,b.iv);
+        if(f < .05) continue;
+        const at = u => { const iu=1-u;
+          return [iu*iu*a.x + 2*iu*u*c[0] + u*u*b.x, iu*iu*a.y + 2*iu*u*c[1] + u*u*b.y]; };
+        // soft halo, then the bright core — both as continuous tapering strokes
+        for(let pass=0; pass<2; pass++){
+          for(let i=0;i<PULSE.seg;i++){
+            const u1 = PULSE.t - i*STEP, u0 = u1 - STEP;
+            if(u1 <= 0 || u0 >= 1) continue;
+            const q0 = at(Math.max(0,u0)), q1 = at(Math.min(1,u1));
+            const k = 1 - i/PULSE.seg;                  // 1 at the head, 0 at the tail
+            const e = k*k*(3-2*k);                      // smoothstep taper
+            ctx.strokeStyle = pass ? 'rgba(255,255,255,'+(0.55*e*f).toFixed(3)+')'
+                                   : 'rgba(180,210,255,'+(0.10*e*f).toFixed(3)+')';
+            ctx.lineWidth = (pass ? 1.5*e + .45 : 5.0*e + 1.2)*Math.max(.8,S);
+            ctx.beginPath(); ctx.moveTo(q0[0],q0[1]); ctx.lineTo(q1[0],q1[1]); ctx.stroke();
+          }
+        }
+      }
+      ctx.globalCompositeOperation='source-over';
+    }
+  }
+
+  /* glow */
+  ctx.globalCompositeOperation='lighter';
+  for(const n of N){
+    const g = GLOW[n.k]; if(!g) continue;
+    const base = n.r*2.0*S;
+    const k = (base*2.6) * (1 + n.h*1.15 + n.p*.24);
+    const a = (0.36 + n.h*.75 + n.p*.30) * n.f * n.iv;
+    ctx.globalAlpha = Math.min(1,a);
+    ctx.drawImage(g, n.x-k, n.y-k, k*2, k*2);
+  }
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation='source-over';
+
+  /* shapes */
+  for(const n of N){
+    if(n.k==='label') continue;
+    const s = (1 + n.h*.55 + n.p*.13) * (0.35 + 0.65*n.iv);
+    const r = n.r*2.0*S*s;
+    const a = (0.72 + n.h*.28) * n.f * n.iv;
+    ctx.strokeStyle = hexa(PAL[n.k], a);
+    ctx.fillStyle   = hexa(PAL[n.k], a*.16);
+    ctx.lineWidth   = Math.max(.8, (n.k==='entity'||n.k==='know' ? 1.05 : 1.45)*Math.max(.8,S)*(1+n.h*.35));
+    shape(n,r);
+  }
+
+  /* the owner keeps breathing out faint rings */
+  if(!REDUCED && USER>=0){
+    const u = N[USER], base = u.r*2.0*S;
+    ctx.globalCompositeOperation='lighter';
+    for(let q=0;q<2;q++){
+      const ph = ((t/3.4) + q*0.5) % 1;
+      const rr = base*(1 + ph*3.2);
+      const al = (1-ph)*(1-ph)*0.42*u.iv;
+      if(al < .004) continue;
+      ctx.strokeStyle = hexa(PAL.user, al);
+      ctx.lineWidth = Math.max(.7, (1.5-ph)*Math.max(.8,S));
+      ctx.beginPath(); ctx.arc(u.x, u.y, rr, 0, 6.2832); ctx.stroke();
+    }
+    ctx.globalCompositeOperation='source-over';
+  }
+
+  /* cluster frames */
+  const FS = Math.max(8.4, 11.4*S);
+  ctx.font = FS.toFixed(1)+'px '+MONOF;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  if('letterSpacing' in ctx) ctx.letterSpacing = (FS*.11).toFixed(2)+'px';
+  for(const n of N){
+    if(n.k!=='label' && n.k!=='user') continue;
+    const tw = ctx.measureText(n.w).width;
+    const bw = tw + FS*1.6, bh = FS*1.95;
+    const cy = n.k==='user' ? n.y + n.r*2.0*S + bh*.95 : n.y;
+    if(n.k==='label'){ n.bw = bw; n.bh = bh; }
+    const a = n.iv * (n.k==='user' ? 1 : 1) * (0.62 + n.h*.38);
+    ctx.beginPath(); rrect(n.x-bw/2, cy-bh/2, bw, bh, 1.5);
+    ctx.fillStyle = 'rgba(2,3,6,'+(0.78*n.iv).toFixed(3)+')'; ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,'+(a*.13).toFixed(3)+')';
+    ctx.lineWidth = Math.max(2.2, 3.4*Math.max(.85,S)); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,'+(a*(n.k==='user'?.8:1)).toFixed(3)+')';
+    ctx.lineWidth = Math.max(.7, 1.05*Math.max(.85,S));
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,'+(n.iv*(0.82+n.h*.18)).toFixed(3)+')';
+    ctx.fillText(n.w, n.x + FS*.055, cy + FS*.06);
+  }
+  if('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+
+  /* selection reticle */
+  for(const n of N){
+    if(n.h<.02) continue;
+    const r = (n.k==='label' ? Math.hypot(n.bw,n.bh)/2 + 8*Math.max(.7,S)
+                             : n.r*2.0*S*(1+n.h*.55))
+              + (9 + n.h*5)*Math.max(.7,S);
+    ctx.save();
+    ctx.translate(n.x,n.y); ctx.rotate(t*.35);
+    ctx.strokeStyle = 'rgba(255,255,255,'+(0.42*n.h).toFixed(3)+')';
+    ctx.lineWidth = Math.max(.7,S*.9);
+    ctx.setLineDash([2.4*Math.max(.8,S), 5.6*Math.max(.8,S)]);
+    ctx.beginPath(); ctx.arc(0,0,r,0,6.2832); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(255,255,255,'+(0.6*n.h).toFixed(3)+')';
+    const tick = 3.4*Math.max(.8,S);
+    for(let i=0;i<4;i++){
+      const ang = i*Math.PI/2 + Math.PI/4;
+      const cx=Math.cos(ang), cy=Math.sin(ang);
+      ctx.beginPath();
+      ctx.moveTo(cx*(r-tick), cy*(r-tick));
+      ctx.lineTo(cx*(r+tick), cy*(r+tick));
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /* card + leader line */
+  updateCard(t);
+
+  requestAnimationFrame(frame);
+}
+
+function ctl(a,b){
+  const mx2=(a.x+b.x)/2, my2=(a.y+b.y)/2;
+  const gx = CX + ((MY.L.x1+MY.R.x0)/2 - (MY.x0+MY.x1)/2)*K;
+  const gy = Math.min(Math.max(my2, CY-0.12*IH), CY+0.17*IH);
+  return [mx2*0.45+gx*0.55, my2*0.72+gy*0.28];
+}
+
+function shape(n,r){
+  const {x,y}=n;
+  ctx.beginPath();
+  if(n.k==='emotion' || n.k==='prefer'){
+    const rr = Math.min(r*.42, 3.2*S);
+    rrect(x-r,y-r,r*2,r*2,rr);
+  } else if(n.k==='exper'){
+    const h=r*1.12;
+    ctx.moveTo(x, y-h); ctx.lineTo(x+r*1.02, y+h*.72); ctx.lineTo(x-r*1.02, y+h*.72); ctx.closePath();
+  } else if(n.k==='user'){
+    const col = PAL.user;
+    ctx.arc(x,y,r,0,6.2832);
+    ctx.fillStyle = hexa(col,.20); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x,y,r*.63,0,6.2832);
+    ctx.strokeStyle = hexa(col,.55*(0.72+n.h*.28)); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x,y,Math.max(1.6,r*.14),0,6.2832);
+    ctx.fillStyle = hexa(col,.95); ctx.fill();
+    return;
+  } else {
+    ctx.arc(x,y,r,0,6.2832);
+  }
+  ctx.fill(); ctx.stroke();
+  if(n.k==='hub'||n.k==='core'){
+    ctx.beginPath(); ctx.arc(x,y,Math.max(1,r*.22),0,6.2832);
+    ctx.fillStyle = hexa(PAL[n.k],.9); ctx.fill();
+  }
+}
+function rrect(x,y,w,h,r){
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);     ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+
+function updateCard(t){
+  if(sel>=0){
+    const n = N[sel];
+    if(sel!==selPrev){
+      selPrev = sel;
+      cKd.textContent = n.k==='label' ? n.w : (n.k==='user' ? 'You · owner' : LABEL[n.k]);
+      cId.textContent = '#'+String(1000+n.id*7%8999).padStart(4,'0');
+      cSw.style.borderColor = PAL[n.k];
+      const s = SRC[n.k];
+      cSrc.textContent = n.k==='label' ? ('cluster · '+n.cnt+' items')
+                       : (s.endsWith('00:') ? s+String(10+n.id%49).padStart(2,'0') : s);
+      // 内容区：簇 → 描述；实体/记忆节点 → 该节点的记忆文本(n.w)；无内容给占位
+      cBody.textContent = n.k==='label' ? ((window.SLOT_SUMMARIES && window.SLOT_SUMMARIES[n.w]) || SLOT_DESC[n.w] || n.w)
+                        : n.k==='user'  ? '账号主人 · this account'
+                        : (n.w || '（暂无记忆内容）');
+    }
+    const w = card.offsetWidth, h = card.offsetHeight;
+    const gap = 34*Math.max(.8,S);
+    // push the card outward, into the dark margin beside the cortex
+    cardSide = (n.x < CX) ? -1 : 1;
+    let tx = n.x + (cardSide>0 ? gap : -gap-w);
+    let ty = n.y - h/2;
+    const off = stage.getBoundingClientRect();
+    const lo = -off.left + 10, hi = window.innerWidth - off.left - w - 10;
+    tx = Math.min(Math.max(tx, lo), Math.max(lo, hi));
+    ty = Math.min(Math.max(ty, -off.top + 10), window.innerHeight - off.top - h - 10);
+    cardTX = tx; cardTY = ty;
+    if(!cardShown){ cardX=tx; cardY=ty; cardShown=true; card.classList.add('on'); }
+  } else if(cardShown){
+    cardShown = false; card.classList.remove('on');
+  }
+
+  if(cardShown){
+    cardX += (cardTX-cardX)*.22;
+    cardY += (cardTY-cardY)*.22;
+    card.style.transform = 'translate3d('+cardX.toFixed(1)+'px,'+cardY.toFixed(1)+'px,0) scale(1)';
+    const n = N[sel];
+    const ax = cardSide>0 ? cardX : cardX+card.offsetWidth;
+    const ay = cardY + card.offsetHeight/2;
+    ctx.strokeStyle = 'rgba(255,255,255,'+(0.5*n.h).toFixed(3)+')';
+    ctx.lineWidth = Math.max(.7,S*.85);
+    ctx.beginPath();
+    ctx.moveTo(n.x + Math.sign(ax-n.x)*(n.r*2.0*S+6), n.y);
+    ctx.lineTo(ax - Math.sign(ax-n.x)*3, ay);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(ax - Math.sign(ax-n.x)*3, ay, 1.6, 0, 6.2832);
+    ctx.fillStyle = 'rgba(255,255,255,'+(0.7*n.h).toFixed(3)+')';
+    ctx.fill();
+  }
+}
+
+resize();
+requestAnimationFrame(frame);
+if(matchMedia('(pointer:coarse)').matches){
+  const h=document.querySelector('.hint'); if(h) h.textContent='TAP THE CORTEX';
+}
+function measurePlate(img){
+  try{
+    const w = 320, h = Math.max(1, Math.round(320*img.naturalHeight/img.naturalWidth));
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const g = c.getContext('2d', {willReadFrequently:true});
+    g.drawImage(img, 0, 0, w, h);
+    const d = g.getImageData(0, 0, w, h).data;
+    const col = new Float32Array(w), row = new Float32Array(h);
+    for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+      const i=(y*w+x)*4, l=Math.max(d[i],d[i+1],d[i+2])*(d[i+3]/255);
+      if(l>34){ col[x]++; row[y]++; }
+    }
+    const span = a => {
+      let m=0; for(const v of a) m=Math.max(m,v);
+      const th = Math.max(1, m*0.03); let i=0, j=a.length-1;
+      while(i<a.length && a[i]<th) i++;
+      while(j>i && a[j]<th) j--;
+      return [i/a.length, (j+1)/a.length];
+    };
+    const [x0,x1] = span(col), [y0,y1] = span(row);
+    if(x1-x0 < 0.2 || y1-y0 < 0.2) return null;
+    const a = Math.round(x0*w), z = Math.round(x1*w);
+    let c0 = Math.round(a+(z-a)*0.37), c1 = Math.round(a+(z-a)*0.63), mid = c0;
+    for(let x=c0;x<c1;x++) if(col[x] < col[mid]) mid = x;
+    const boxOf = (xa, xb) => {
+      const cc = new Float32Array(xb-xa), rr = new Float32Array(h);
+      for(let y=0;y<h;y++) for(let x=xa;x<xb;x++){
+        const i=(y*w+x)*4, l=Math.max(d[i],d[i+1],d[i+2])*(d[i+3]/255);
+        if(l>34){ cc[x-xa]++; rr[y]++; }
+      }
+      const [p,q] = span(cc), [u,v] = span(rr);
+      return { x0:(xa+p*(xb-xa))/w, x1:(xa+q*(xb-xa))/w, y0:u, y1:v };
+    };
+    const Lb = boxOf(a, mid), Rb = boxOf(mid, z);
+    if(Lb.x1-Lb.x0 < 0.08 || Rb.x1-Rb.x0 < 0.08) return null;
+    return {x0,x1,y0,y1,mid:mid/w,L:Lb,R:Rb};
+  }catch(e){ return null; }   // tainted canvas etc. -> fall back
+}
+function plateLoaded(){
+  if(brain.naturalWidth) AR = brain.naturalWidth/brain.naturalHeight;
+  DET = measurePlate(brain);
+  resize(); brain.classList.add('in');
+}
+if(brain.complete && brain.naturalWidth) plateLoaded();
+else brain.addEventListener('load', plateLoaded);
+
+/* ---- 外部激活：按 schema(簇标签) / 节点类型 点亮脑图节点 ----
+   window.brainActivate({schemas:['food'], kinds:['entity','emotion']}) 会把对应
+   的 schema 簇(标签+其成员)和指定类型的节点持续点亮；window.brainClear() 复位。 */
+const LABEL_BY_W = {};
+N.forEach((n,i)=>{ if(n.k==='label' && n.w) LABEL_BY_W[n.w.toLowerCase()] = i; });
+window.brainActivate = function(opts){
+  opts = opts || {};
+  const schemas = (opts.schemas||[]).map(s=>String(s).toLowerCase());
+  const kinds = new Set(opts.kinds||[]);
+  for(const n of N) n.act = 0;
+  for(const s of schemas){                       // schema 簇：标签节点 + 直接相连的成员
+    const li = LABEL_BY_W[s];
+    if(li==null) continue;
+    N[li].act = 1;
+    for(const nb of NB[li]) N[nb].act = Math.max(N[nb].act, 0.6);
+  }
+  if(kinds.size) for(const n of N) if(kinds.has(n.k)) n.act = Math.max(n.act, 0.62);
+};
+window.brainClear = function(){ for(const n of N) n.act = 0; };
+
+/* ---- 运行时生长：实时对话时往脑图新增节点 + 连线（映射关系）----
+   window.brainAdd(side, kind, label) 在对应半球加一个节点并连到 user 节点，
+   返回 id；带淡入 + 短暂高亮。R_BY_KIND 控制不同类型的点大小。 */
+const R_BY_KIND = { entity:2.6, know:2.6, person:2.6, emotion:5.4, exper:5.0, prefer:5.2 };
+function _nowT(){ return (performance.now()-t0)/1000; }
+window.brainAdd = function(side, kind, label, slot){
+  // slot 给定且脑图里有该 SlotV2 簇标签 → 新节点撒在那个槽的簇附近（按槽分）
+  const li0 = slot!=null ? LABEL_BY_W[String(slot).toLowerCase()] : undefined;
+  let bx, by;
+  if(li0!=null){ bx = N[li0].bx + (Math.random()-0.5)*0.10; by = N[li0].by + (Math.random()-0.5)*0.14; }
+  else { bx = side==='R' ? 0.60+Math.random()*0.28 : 0.14+Math.random()*0.28; by = 0.20+Math.random()*0.62; }
+  const n = {
+    bx, by, side, sx:0, sy:0, k:kind, r:R_BY_KIND[kind]||3.2, w:label||'', bw:0, bh:0,
+    ph:Math.random()*6.28, ph2:Math.random()*6.28,
+    sp:0.28+Math.random()*0.42, ax:0.55+Math.random()*0.9, ay:0.55+Math.random()*0.9,
+    x:0,y:0,h:0,p:0,f:1,iv:0, id:N.length, act:0.95, dl:_nowT()
+  };
+  N.push(n); ADJ.push([]); NB.push([]);
+  // 连线（映射关系）：左脑有槽 → 连到该槽的簇标签（归属）；否则连到 user（跨脑）
+  const tgt = li0!=null ? li0 : USER;
+  if(tgt>=0){
+    const t = li0!=null ? 'in' : 'cross';
+    const i = L.length; L.push({a:tgt, b:n.id, t, w:t==='cross'?0.6:0.4});
+    ADJ[tgt].push(i); ADJ[n.id].push(i); NB[tgt].push(n.id); NB[n.id].push(tgt);
+    if(t==='cross') CROSS.push({l:L[i]});
+  }
+  resize();
+  return n.id;
+};
+})();
+</script>
+<script>
+/* ---- rail collapse + voice indicator + data hooks ------------------------
+   脑图那段脚本保持不动；这里只管新加的左栏收起、语音波形/耳朵、以及把数据
+   灌进三个块的对外钩子（window.vm.*，接后端时调用即可）。 */
+(function(){
+  const app = document.getElementById('app');
+  const toggle = document.getElementById('railToggle');
+  toggle.addEventListener('click', ()=>{
+    const c = app.classList.toggle('rail-collapsed');
+    toggle.textContent = c ? '›' : '‹';
+  });
+
+  // 语音指示器：AI 说话时画波形动线，用户说话时显示一只耳朵（画的，非 emoji）
+  const voice = document.getElementById('voice');
+  const lab   = document.getElementById('voiceLab');
+  const wave  = document.getElementById('wave');
+  const wc    = wave.getContext('2d');
+  const LAB = { idle:'idle · 待机', user:'listening · 用户说话', ai:'speaking · AI 回复' };
+  let vstate = 'idle', vt = 0, amp = 0;
+
+  function setVoiceState(s){
+    vstate = s;
+    voice.className = 'voice' + (s==='ai' ? ' ai' : s==='user' ? ' user' : '');
+    lab.textContent = LAB[s] || s;
+  }
+  function sizeWave(){
+    const r = wave.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio||1);
+    wave.width = Math.max(1, r.width*dpr); wave.height = Math.max(1, r.height*dpr);
+    wc.setTransform(dpr,0,0,dpr,0,0);
+  }
+  new ResizeObserver(sizeWave).observe(wave); sizeWave();
+
+  function waveFrame(){
+    vt += 0.06;
+    const w = wave.clientWidth||150, h = wave.clientHeight||30, mid = h/2;
+    amp += ((vstate==='ai'?1:0) - amp) * 0.12;          // 平滑进出
+    wc.clearRect(0,0,w,h);
+    wc.beginPath();
+    for(let x=0;x<=w;x++){
+      const env = Math.sin(x/w*Math.PI);                 // 两端收窄
+      const y = mid + Math.sin(x*0.14 - vt*2.2) * env * (h*0.4) * amp
+                    * (0.5 + 0.5*Math.sin(vt*1.7 + x*0.05));
+      x ? wc.lineTo(x,y) : wc.moveTo(x,y);
+    }
+    wc.strokeStyle = 'rgba(140,233,179,'+(0.35+0.5*amp).toFixed(2)+')';
+    wc.lineWidth = 1.6; wc.stroke();
+    requestAnimationFrame(waveFrame);
+  }
+  waveFrame();
+
+  // 对外钩子：接后端（WS/REST）时调这些把真实数据灌进来
+  const $ = id => document.getElementById(id);
+  window.vm = {
+    setVoiceState,
+    setInput: t => { $('liveInput').innerHTML = t + '<span class="caret"></span>'; },
+    setReply: t => { $('reply').textContent = t; },
+    setTags: tags => {
+      $('tags').innerHTML = tags.map(t => `<span class="tag ${t.k}"><b>${t.b}</b>${t.v}</span>`).join('');
+      // 标签一变，就按其中的 schema / 类型点亮脑图对应节点
+      const schemas = tags.filter(t=>t.k==='sch').map(t=>t.v);
+      const kinds = tags.some(t=>t.k==='ent') ? ['entity'] : [];
+      if(tags.some(t=>t.k==='emo')) kinds.push('emotion');
+      window.brainActivate && window.brainActivate({schemas, kinds});
+    },
+    setRecall: (side, items) => { $(side==='r'?'recallR':'recallL').innerHTML = items.map(
+      it => `<li><span>${it.text}</span><span class="sc">${it.score}</span></li>`).join(''); },
+    activate: o => window.brainActivate && window.brainActivate(o),
+    clear:   () => window.brainClear && window.brainClear(),
+  };
+
+  /* ================= 实时语音：连 openai_voice_demo 的 WS 后端 =================
+     后端默认 pipeline provider，发 partial_transcript / user_transcript /
+     memory_hits{left_brain,right_brain_hits,current_scene} / answer_start|delta|done
+     + 二进制 24kHz PCM16 回复音频；麦克风上行也是 24kHz PCM16 mono。
+     后端地址默认 ws://<本机>:8787/ws，可用 ?ws=host:port 覆盖。 */
+  const SAMPLE_RATE = 24000, PREBUFFER = 0.08;   // realtime 音频稳，用最小预缓冲开口最快（卡就回调 0.12~0.2）
+  const params = new URLSearchParams(location.search);
+  const WS_HOST = params.get('ws') || ((location.hostname || 'localhost') + ':8787');
+  const WS_URL = (location.protocol==='https:'?'wss://':'ws://') + WS_HOST + '/ws';
+
+  const talkBtn = $('talkBtn');
+  let ws=null, recording=false, micStream=null, micCtx=null, micProc=null;
+  let playCtx=null, scheduled=[], nextPlay=0, replyText='';
+
+  // 脑图去重：同一条记忆文本只长一次节点；再次命中就跳过（避免刷屏）
+  const seen = new Map(); let addedCount=0; const MAX_NODES=48;
+  let curSlots = [];                           // 本轮 classify 出的 SlotV2 槽（左脑按此分）
+  const SRC_KIND = { emotion_trait:'emotion', current_signal:'emotion', response_experience:'exper',
+                     situation_pattern:'exper', profile:'prefer', relation:'exper' };
+  const RIGHT_CLUSTER = { emotion:'emotion', exper:'experiences', prefer:'preference' };
+  window.SLOT_SUMMARIES = window.SLOT_SUMMARIES || {};   // {slot: 会话级概括}
+  function railAdd(slot, text){                // 左侧栏板对应槽的列表里也实时追加
+    const ul = document.getElementById('mem-'+slot); if(!ul) return;
+    const li = document.createElement('li'); li.textContent = text.slice(0,42); li.className='new';
+    ul.appendChild(li);
+    const cnt = document.getElementById('cnt-'+slot);
+    if(cnt) cnt.textContent = ul.querySelectorAll('li:not(.you)').length;
+  }
+  function growLeft(text, slot){
+    const key = 'L|'+text; if(seen.has(key) || addedCount>=MAX_NODES) return;
+    seen.set(key, window.brainAdd('L','entity', text, slot)); addedCount++;
+    railAdd(slot, text);
+  }
+  function growRight(kind, text){
+    const key = 'R|'+text; if(seen.has(key) || addedCount>=MAX_NODES) return;
+    const cluster = RIGHT_CLUSTER[kind] || 'experiences';
+    seen.set(key, window.brainAdd('R', kind, text, cluster)); addedCount++;
+    railAdd(cluster, text);
+  }
+  function onMemoryHits(m){
+    console.log('[voice] memory_hits  left=', (m.left_brain||[]).length,
+                'right=', (m.right_brain_hits||[]).length, 'scene=', m.current_scene);
+    if(m.related_summaries) Object.assign(window.SLOT_SUMMARIES, m.related_summaries);
+    const trunc = s => { s = String(s||''); return s.length>42 ? s.slice(0,42)+'…' : s; };
+    const left  = (m.left_brain||[]).slice(0,5).map(h=>({text:trunc(h.text),    score:(h.score||0).toFixed(2)}));
+    const right = (m.right_brain_hits||[]).slice(0,5).map(h=>({text:trunc(h.content), score:(h.priority||0).toFixed(2)}));
+    window.vm.setRecall('l', left);
+    window.vm.setRecall('r', right);
+    // 标签：场景(schema) + 情绪 + 实体
+    const tags=[];
+    const emo = (m.right_brain_hits||[]).find(h=>h.source==='emotion_trait'||h.source==='current_signal');
+    if(emo) tags.push({k:'emo',b:'emotion',v:(emo.content||'').slice(0,10)});
+    const ent = (m.left_brain||[]).map(h=>h.attributed_to).find(a=>a && a!=='user' && a!=='User');
+    if(ent) tags.push({k:'ent',b:'entity',v:ent});
+    if(m.current_scene) tags.push({k:'sch',b:'schema',v:m.current_scene});
+    if(tags.length) $('tags').innerHTML = tags.map(t=>`<span class="tag ${t.k}"><b>${t.b}</b>${t.v}</span>`).join('');
+    // 脑图生长：左脑事实 → 按 SlotV2 槽归到对应簇；右脑命中 → 右半球对应类型节点
+    const slots = curSlots.length ? curSlots : ['daily_life'];
+    (m.left_brain||[]).slice(0,4).forEach((h,i)=> growLeft(h.text, slots[i % slots.length]));
+    for(const h of (m.right_brain_hits||[]).slice(0,4)) growRight(SRC_KIND[h.source]||'exper', h.content);
+  }
+
+  // ---- playback（复用 orb.html 机制）----
+  function playPcm(buf){
+    if(!playCtx) playCtx=new (window.AudioContext||window.webkitAudioContext)();
+    const i16=new Int16Array(buf), f32=new Float32Array(i16.length);
+    for(let i=0;i<i16.length;i++) f32[i]=i16[i]/32768;
+    const b=playCtx.createBuffer(1,f32.length,SAMPLE_RATE); b.copyToChannel(f32,0);
+    const s=playCtx.createBufferSource(); s.buffer=b; s.connect(playCtx.destination);
+    scheduled.push(s); s.onended=()=>{const i=scheduled.indexOf(s); if(i>=0)scheduled.splice(i,1);};
+    const now=playCtx.currentTime, at=nextPlay>now?nextPlay:now+PREBUFFER; s.start(at); nextPlay=at+b.duration;
+  }
+  function stopPlayback(){ for(const s of scheduled.splice(0)){try{s.stop();}catch(e){}} if(playCtx) nextPlay=playCtx.currentTime; }
+
+  function handle(msg){
+    console.log('[voice] <<', msg.type, msg.text!==undefined?JSON.stringify(msg.text).slice(0,40):'');
+    switch(msg.type){
+      case 'speech_tentative': setVoiceState('user'); if(playCtx&&playCtx.state==='running')playCtx.suspend(); break;
+      case 'partial_transcript': setVoiceState('user'); window.vm.setInput(msg.replace? msg.text : ($('liveInput').textContent.replace('…','')+msg.text)); break;
+      case 'user_transcript':
+        window.vm.setInput(msg.text);
+        // 分类本轮文本 → SlotV2 槽（左脑生长据此归槽）；同源 :8000 调 facade
+        fetch('/api/classify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:msg.text})})
+          .then(r=>r.json()).then(d=>{ curSlots = (d.slots&&d.slots.length)? d.slots : []; }).catch(()=>{});
+        break;
+      case 'memory_hits': onMemoryHits(msg); break;
+      case 'answer_start': setVoiceState('ai'); replyText=''; $('reply').textContent=''; if(playCtx&&playCtx.state==='suspended')playCtx.resume(); break;
+      case 'answer_delta': replyText+=msg.text; $('reply').textContent=replyText; break;
+      case 'answer_done': setTimeout(()=>setVoiceState('idle'), 400); break;
+      case 'answer_resume': if(playCtx&&playCtx.state==='suspended')playCtx.resume(); break;
+      case 'answer_interrupt': stopPlayback(); break;
+      case 'error': console.warn('[backend]', msg.message); $('reply').textContent='⚠ 后端错误：'+msg.message; setVoiceState('idle'); break;
+    }
+  }
+
+  // ---- mic（复用 orb.html 机制）----
+  function downsample(f32,from,to){ if(from===to)return f32; const r=from/to,n=Math.round(f32.length/r),o=new Float32Array(n);
+    for(let i=0;i<n;i++){const s=i*r,a=Math.floor(s),b=Math.min(a+1,f32.length-1),fr=s-a; o[i]=f32[a]*(1-fr)+f32[b]*fr;} return o; }
+  function toPCM16(f32){ const o=new Int16Array(f32.length); for(let i=0;i<f32.length;i++){const s=Math.max(-1,Math.min(1,f32[i])); o[i]=s<0?s*0x8000:s*0x7fff;} return o; }
+  async function startMic(){
+    micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+    if(!micCtx) micCtx=new (window.AudioContext||window.webkitAudioContext)();
+    const src=micCtx.createMediaStreamSource(micStream); micProc=micCtx.createScriptProcessor(4096,1,1);
+    const g=micCtx.createGain(); g.gain.value=0;
+    micProc.onaudioprocess=e=>{ if(!recording||!ws||ws.readyState!==WebSocket.OPEN)return;
+      ws.send(toPCM16(downsample(e.inputBuffer.getChannelData(0), micCtx.sampleRate, SAMPLE_RATE)).buffer); };
+    src.connect(micProc); micProc.connect(g); g.connect(micCtx.destination);
+  }
+  function stopMic(){ if(micProc){micProc.disconnect();micProc=null;} if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null;} }
+
+  // 打开 WS（文字轮和语音轮共用一条），返回 Promise，open 后 resolve
+  function openWS(){
+    return new Promise((resolve, reject)=>{
+      if(ws && ws.readyState<=1){ ws.readyState===1 ? resolve() : ws.addEventListener('open',()=>resolve(),{once:true}); return; }
+      $('voiceLab').textContent = '连接中… ' + WS_HOST;
+      console.log('[voice] connecting', WS_URL);
+      let opened=false;
+      try{ ws=new WebSocket(WS_URL); }catch(e){ $('voiceLab').textContent='WS 地址无效'; return reject(e); }
+      ws.binaryType='arraybuffer';
+      ws.onopen =()=>{ opened=true; $('voiceLab').textContent='已连接'; console.log('[voice] ws open'); resolve(); };
+      ws.onclose=ev=>{
+        console.log('[voice] ws closed  code=', ev.code, 'reason=', JSON.stringify(ev.reason), 'wasClean=', ev.wasClean);
+        recording=false; talkBtn.textContent='开始对话'; talkBtn.classList.remove('live'); setVoiceState('idle'); ws=null;
+        if(!opened) $('voiceLab').textContent = (ev.code===1006? '连不上 '+WS_HOST+'（:8787 没在跑/端口不对）' : '连接被关 code='+ev.code);
+        else $('voiceLab').textContent = '连接已关闭 code='+ev.code+(ev.reason?(' · '+ev.reason):'');
+        reject(new Error('ws closed '+ev.code));
+      };
+      ws.onerror=()=>{ console.warn('[voice] ws error'); };
+      ws.onmessage=ev=>{ if(ev.data instanceof ArrayBuffer){ try{playPcm(ev.data);}catch(e){} return; } handle(JSON.parse(ev.data)); };
+    });
+  }
+
+  async function start(){                       // 语音：麦克风 + WS
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      $('voiceLab').textContent = '请用 http://localhost:8000 打开（不能直接双击 html）'; return;
+    }
+    try{ await startMic(); }catch(e){ $('voiceLab').textContent='麦克风被拒绝/不可用'; console.warn(e); return; }
+    try{ await openWS(); }catch(e){ stopMic(); return; }
+    recording=true; talkBtn.textContent='结束对话'; talkBtn.classList.add('live'); setVoiceState('user');
+  }
+  function stop(){ recording=false; stopMic(); stopPlayback(); if(ws){ws.close();ws=null;} talkBtn.textContent='开始对话'; talkBtn.classList.remove('live'); setVoiceState('idle'); }
+  talkBtn.addEventListener('click', ()=>{ try{ recording? stop() : start(); }catch(e){ console.error(e); $('voiceLab').textContent='出错: '+e.message; } });
+
+  // 文字轮：打字回车 → 走后端 {type:user_text}，完全绕过 ASR（只需 OpenAI）
+  const textIn = $('textIn');
+  textIn.addEventListener('keydown', async e=>{
+    if(e.key!=='Enter') return;
+    const t = textIn.value.trim(); if(!t) return;
+    textIn.value=''; window.vm.setInput(t); curSlots=[];
+    try{ await openWS(); }catch(err){ return; }
+    ws.send(JSON.stringify({type:'user_text', text:t}));
+  });
+})();
+</script>
+</body>
+</html>

@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-from voicemem import VoiceMem
+from voicemem_core import VoiceMem
 
 DEFAULT_USER_ID = "voice_user"
 
