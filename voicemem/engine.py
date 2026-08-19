@@ -24,9 +24,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from voicemem.leftbrain.cognitive_graph.slot_v2 import SLOT_RELATIONS
 from voicemem.leftbrain.cognitive_graph.query_slot_classifier import QueryClassification
 from voicemem.leftbrain.local_memory_store import MemorySearchHit
+# 左脑那一整块（slot 过滤/实体缩窄/时间扩候选/向量排序/查询分类/LLM 打标签/
+# slot→entity 图层/子图记账与 checkpoint/schema 描述刷新/冷记忆归档）搬进了
+# LeftBrain 组件；_search_mode 辅助函数随之迁至 voicemem.leftbrain.brain。这里
+# 反向 import 回来，维持既有 `from voicemem.engine import _search_mode` 等契约。
+from voicemem.leftbrain.brain import LeftBrain, _search_mode
 from voicemem.utils.audio.perceiver import AudioPerception, AudioPerceiver
 # 右脑那一整块（heartnote 写入/内心OS/图层/检索/清洁）搬进了 RightBrain 组件；
 # RightBrainHit 数据类与 _rb_* 辅助函数随之迁至 voicemem.rightbrain.brain。
@@ -65,49 +69,9 @@ class SearchResult:
     timing: dict = None                 # {slot_filter, entity_narrow, rank, rb, total} 单位 ms
 
 
-# 靠词面/时间加分"救回"的记忆最多补几条（在 top_k 之外额外给，不占语义名额）
-_RESCUE_K = 3
-
-# 候选池构造模式（VOICEMEM_POOL_MODE）：
-#   union  —— slot 池 ∪ 宏观关联 slot 池 ∪ 实体池 ∪ 一跳邻居池。
-#   strict —— schema routing → entity narrowing → graph expansion：实体命中时取
-#             slot 池 ∩ (实体 ∪ 一跳邻居)（交集太小则退回实体池，再空才退回 slot
-#             池）；宏观 slot 扩散只在 slot 池小于 _STRICT_MACRO_MIN_POOL 时才开。
-_POOL_MODE_ENV = "VOICEMEM_POOL_MODE"
-_STRICT_MIN_INTERSECTION = 3      # 交集至少这么多条才用交集
-_STRICT_MACRO_MIN_POOL = 30       # slot 池小于这个数才做宏观 slot 扩散
-
-
-def _pool_mode() -> str:
-    return os.environ.get(_POOL_MODE_ENV, "union").strip().lower()
-
-# 场景切换时用于主动检索的查询词——选取该场景最常关联的记忆主题（audiomem）
-_SCENE_RECALL_QUERY: dict[str, str] = {
-    "office":  "工作任务截止日期会议",
-    "transit": "通勤路上待办事项",
-    "home":    "家里要做的事情购物清单",
-    "café":    "灵感想法头脑风暴",
-    "meeting": "会议议程项目进展",
-    "outdoor": "运动健康目标",
-    "quiet":   "学习计划专注任务",
-}
-
-# "回放原声"意图关键词：命中任意一个就认为用户在要求听回放，整句直接拿去语义搜索。
-_PLAYBACK_PATTERNS = ["回放", "播放", "放一下", "听听", "重新放", "再放一遍"]
-
-
-# ── 辅助函数 ───────────────────────────────────────────────────────────────────
-
-def _search_mode(slot_ids: set, final_ids: set) -> str:
-    if not slot_ids and not final_ids:
-        return "fallback"
-    if final_ids and final_ids < slot_ids:
-        return "entity+slot-intersection"
-    if final_ids == slot_ids:
-        return "slot-only"
-    return "entity+slot-union"
-
-
+# 左脑那一整块的候选池构造/救回常量（_RESCUE_K / _POOL_MODE_ENV / _pool_mode /
+# _STRICT_* 等）与 _search_mode 辅助函数随左脑块迁至 voicemem.leftbrain.brain
+# （_search_mode 在本模块顶部导入回来，供 Search() 组装 SearchResult 时调用）。
 # RightBrainHit / _rb_* 辅助函数与 _is_en_text 已随右脑块迁至
 # voicemem.rightbrain.brain（本模块顶部导入回来，供 Search() 等继续直接调用）；
 # AudioPerception 迁至 voicemem.utils.audio.perceiver。
@@ -176,6 +140,31 @@ class VoiceMem:
         self._lock = threading.Lock()
         self._ingest_count = 0
 
+        # ── 左脑组件（组合模式：自持左脑零件 + 显式注入跨域/运行时依赖）───────────
+        # 左脑那一整块（slot 过滤/实体缩窄/时间扩候选/向量排序/查询分类/LLM 打标签/
+        # slot→entity 图层/子图记账与 checkpoint/schema 描述刷新/冷记忆归档）搬进了
+        # LeftBrain。它自持 5 个左脑侧懒加载单例（repo/extractor/dynamic_slot_store/
+        # graph_entity_store/subgraph_manager，与宿主共享同一 _cache/_lock）；凡是要
+        # 用到文本 embedding / LLM(JSON) / LLM(text) / 可注入分类器 / 会话追踪器这些
+        # 跨域或运行时能力的地方，一律以 getter/函数引用在此显式注入（懒加载语义不变）。
+        # 先于 _audio/_right 构造：engine 的 _get_repo 等转发到 self._left，且 _audio/
+        # _right 注入的 repo=self._get_repo 会经转发落到这里同一份左脑单例。
+        self._left = LeftBrain(
+            memory_root=self._memory_root,
+            user_id=self._user_id,
+            base_url=self._base_url,
+            cognitive_db=self._cognitive_db,
+            embedder=self._embedder,
+            vector_store=self._vector_store,
+            embed=self._embed_text,
+            llm_json=self._llm_json,
+            llm_text=self._llm_text,
+            classifier=self._classifier,
+            tracker=self._get_session_tracker,
+            cache=self._cache,
+            lock=self._lock,
+        )
+
         # ── 音频感知组件（组合模式：自持音频零件 + 显式注入左脑依赖）───────────
         # 音频那一整块（场景/声纹/情绪/环境音/audiomem 标签/回放）搬进了
         # AudioPerceiver。它自持 10 个音频侧懒加载单例（env/clap/speaker/vp/
@@ -229,24 +218,10 @@ class VoiceMem:
     # ── 懒加载单例 ──────────────────────────────────────────────────────────────
 
     def _get_repo(self):
-        with self._lock:
-            if "repo" not in self._cache:
-                from voicemem.leftbrain.cognitive_graph import CognitiveAnnotator, CognitiveAnnotatorConfig
-                from voicemem.leftbrain.local_memory_store import OpenAILocalEmbedder, OpenAILocalEmbedderConfig
-                from voicemem.leftbrain.memory_repository_v2 import LeftBrainMemoryRepositoryConfig, LeftBrainMemoryRepositoryV2
-                annotator = CognitiveAnnotator(CognitiveAnnotatorConfig(base_url=self._base_url))
-                embedder  = self._embedder or OpenAILocalEmbedder(OpenAILocalEmbedderConfig(base_url=self._base_url))
-                cfg = LeftBrainMemoryRepositoryConfig(
-                    json_path=self._memory_root / "memories.json",
-                    db_path=self._memory_root / "voicemem_leftbrain.sqlite",
-                    cognitive_db_path=self._cognitive_db,
-                    enable_cognitive_graph=True,
-                )
-                self._cache["repo"] = LeftBrainMemoryRepositoryV2(
-                    embedder, config=cfg, cognitive_annotator=annotator,
-                    vector_store=self._vector_store,
-                )
-        return self._cache["repo"]
+        # 左脑单例已随左脑块搬进 LeftBrain 组件；转发以维持既有调用点/测试对
+        # VoiceMem 实例的直接访问，以及 _audio/_right 注入的 repo=self._get_repo
+        # （读写的是共享 _cache 里同一个 "repo"）。
+        return self._left._get_repo()
 
     def _get_rb_repo(self):
         # 右脑单例已随右脑块搬进 RightBrain 组件；转发以维持既有调用点/测试对
@@ -254,16 +229,8 @@ class VoiceMem:
         return self._right._rb_repo()
 
     def _get_extractor(self):
-        with self._lock:
-            if "extractor" not in self._cache:
-                from voicemem.leftbrain.extract_facts_openai import (
-                    OpenAIAdditiveExtractorConfig,
-                    OpenAIMem0V3AdditiveExtractor,
-                )
-                self._cache["extractor"] = OpenAIMem0V3AdditiveExtractor(
-                    OpenAIAdditiveExtractorConfig(base_url=self._base_url)
-                )
-        return self._cache["extractor"]
+        # 左脑单例已搬进 LeftBrain 组件；转发（共享 _cache 里同一个 "extractor"）。
+        return self._left._get_extractor()
 
     def _get_registry(self):
         with self._lock:
@@ -349,32 +316,18 @@ class VoiceMem:
     # ── Dynamic slot（子图机制涌现的新 slot） ──────────────────────────────────
 
     def _get_dynamic_slot_store(self):
-        with self._lock:
-            if "dynamic_slot_store" not in self._cache:
-                from voicemem.leftbrain.slot_split import DynamicSlotStore
-                self._cache["dynamic_slot_store"] = DynamicSlotStore(
-                    self._memory_root / "slot_splits.sqlite"
-                )
-        return self._cache["dynamic_slot_store"]
+        # 左脑单例已搬进 LeftBrain 组件；转发（共享 _cache 里同一个 "dynamic_slot_store"）。
+        return self._left._get_dynamic_slot_store()
 
     def _get_dynamic_slots(self) -> list[tuple[str, str]]:
-        """返回该用户已涌现的动态 slot [(name, description), ...]。"""
-        try:
-            return [(s.name, s.description)
-                    for s in self._get_dynamic_slot_store().get_dynamic_slots(self._user_id)]
-        except Exception:
-            return []
+        """返回该用户已涌现的动态 slot [(name, description), ...]，转发到 LeftBrain。"""
+        return self._left._get_dynamic_slots()
 
     # ── slot→entity 图层（左脑：挂在 SlotV2 下；右脑：5个感性slot） ─────────────
 
     def _get_graph_entity_store(self):
-        with self._lock:
-            if "graph_entity_store" not in self._cache:
-                from voicemem.leftbrain.slot_split import GraphEntityStore
-                self._cache["graph_entity_store"] = GraphEntityStore(
-                    self._memory_root / "graph_entities.sqlite"
-                )
-        return self._cache["graph_entity_store"]
+        # 左脑单例已搬进 LeftBrain 组件；转发（共享 _cache 里同一个 "graph_entity_store"）。
+        return self._left._get_graph_entity_store()
 
     def _get_rb_graph_store(self):
         # 右脑单例已搬进 RightBrain 组件；转发（共享 _cache 里同一个 "rb_graph_store"）。
@@ -390,21 +343,8 @@ class VoiceMem:
         return self._cache["session_tracker"]
 
     def _get_subgraph_manager(self):
-        graph_store = self._get_graph_entity_store()   # 在 lock 外先拿，避免嵌套 acquire
-        dyn_store = self._get_dynamic_slot_store()
-        with self._lock:
-            if "subgraph_manager" not in self._cache:
-                from voicemem.leftbrain.slot_split import SubgraphManager
-
-                def _tag_new_slot(user_id: str, memory_id: str, slot_name: str) -> None:
-                    cog_store = self._get_repo()._cognitive_store
-                    if cog_store is not None and hasattr(cog_store, "upsert_memory_tags"):
-                        cog_store.upsert_memory_tags(memory_id, user_id, [(slot_name, 0.9)])
-
-                self._cache["subgraph_manager"] = SubgraphManager(
-                    graph_store, dyn_store, llm_fn=self._llm_json, tag_fn=_tag_new_slot,
-                )
-        return self._cache["subgraph_manager"]
+        # 左脑单例已搬进 LeftBrain 组件；转发（共享 _cache 里同一个 "subgraph_manager"）。
+        return self._left._get_subgraph_manager()
 
     def _get_attribution_manager(self):
         # 右脑单例已搬进 RightBrain 组件；转发（共享 _cache 里同一个 "attribution_manager"）。
@@ -507,390 +447,47 @@ class VoiceMem:
             print(f"[Attribution] LLM 失败: {e}")
             return ""
 
-    # ── Step 1: slot 过滤 ──────────────────────────────────────────────────────
+    # ── 左脑检索步骤（转发到 LeftBrain：SearchCogGraph/SearchData/Rank 等）─────
 
-    def SearchCogGraph(
-        self,
-        slots: list[str],
-        entities: list[str] | None = None,
-        scene_filter: str | None = None,
-        speaker_filter: str | None = None,
-    ) -> tuple[set[str], QueryClassification]:
-        """slot 过滤，返回该 slot 下所有记忆 ID。
+    def SearchCogGraph(self, *a, **k) -> tuple[set[str], QueryClassification]:
+        """slot 过滤，转发到 LeftBrain.SearchCogGraph。"""
+        return self._left.SearchCogGraph(*a, **k)
 
-        Parameters
-        ----------
-        slots:
-            由语音模块提供的 slot 列表，如 ``["work"]``。
-        entities:
-            由语音模块提供的实体列表，如 ``["阿里"]``。可为空。
-        scene_filter:
-            可选场景过滤（audiomem），如 ``"office"``。
-        speaker_filter:
-            可选说话人过滤（audiomem），传入 person_id（如 ``"person_3a2f1b"``）。
-            只返回该说话人说过的记忆。
+    def SearchData(self, *a, **k) -> set[str]:
+        """实体缩窄，转发到 LeftBrain.SearchData。"""
+        return self._left.SearchData(*a, **k)
 
-        Returns
-        -------
-        (slot_mem_ids, classification)
-            ``slot_mem_ids`` — 候选 memory_id 集合。
-            ``classification`` — 封装了 slots 和 entities 的数据容器。
-        """
-        classification = QueryClassification(
-            slots=slots,
-            entities=entities or [],
-        )
-        store = self._get_repo()._cognitive_store
+    def _search_data_impl(self, *a, **k) -> tuple[set[str], list[str]]:
+        """SearchData 真正实现（多返 activated_names），转发到 LeftBrain。"""
+        return self._left._search_data_impl(*a, **k)
 
-        # 所有 slot 的记忆池取并集：Classify() 既返回精确子 slot 也返回宽父 slot。
-        slot_mem_ids: set[str] = set()
-        if classification.slots and store is not None and hasattr(store, "memory_ids_for_slots_v2"):
-            slot_mem_ids = set(store.memory_ids_for_slots_v2(self._user_id, classification.slots))
+    def _widen_for_time_question(self, *a, **k) -> set[str]:
+        """时间类问题扩候选，转发到 LeftBrain。"""
+        return self._left._widen_for_time_question(*a, **k)
 
-        # 场景过滤（audiomem）：取 scene:<tag> 标签的记忆与 slot 结果的交集
-        if scene_filter and slot_mem_ids:
-            try:
-                if store and hasattr(store, "memory_ids_for_slots_v2"):
-                    scene_ids = set(
-                        store.memory_ids_for_slots_v2(
-                            self._user_id, [f"scene:{scene_filter}"]
-                        )
-                    )
-                    narrowed = slot_mem_ids & scene_ids
-                    if narrowed:
-                        slot_mem_ids = narrowed
-            except Exception:
-                pass
+    def Rank(self, *a, **k) -> list[MemorySearchHit]:
+        """向量相似度排序，转发到 LeftBrain.Rank。"""
+        return self._left.Rank(*a, **k)
 
-        # 说话人过滤（audiomem）：取 speaker:<person_id> 标签与 slot 结果的交集。
-        # slot_mem_ids 为空时（未指定 slot）直接把该说话人的记忆当作基础候选池。
-        if speaker_filter:
-            try:
-                if store and hasattr(store, "memory_ids_for_slots_v2"):
-                    spk_ids = set(
-                        store.memory_ids_for_slots_v2(
-                            self._user_id, [f"speaker:{speaker_filter}"]
-                        )
-                    )
-                    if slot_mem_ids:
-                        narrowed = slot_mem_ids & spk_ids
-                        if narrowed:
-                            slot_mem_ids = narrowed
-                    elif spk_ids:
-                        slot_mem_ids = spk_ids
-            except Exception:
-                pass
+    # ── v5：LLM 打标签（转发到 LeftBrain）─────────────────────────────────────
 
-        return slot_mem_ids, classification
+    def _get_slot_base_embeddings(self, *a, **k) -> dict[str, list[float]]:
+        return self._left._get_slot_base_embeddings(*a, **k)
 
-    # ── Step 2: 实体匹配（纯认知图，不碰向量） ──────────────────────────────────
+    def _get_slot_dyn_embeddings(self, *a, **k) -> dict[str, list[float]]:
+        return self._left._get_slot_dyn_embeddings(*a, **k)
 
-    def SearchData(
-        self,
-        slot_mem_ids: set[str],
-        classification: QueryClassification,
-    ) -> set[str]:
-        """在 slot_mem_ids 基础上用实体名称做交集缩窄，返回最终候选 ID 集合。
+    def _normalize_slot_name(self, *a, **k) -> str:
+        return self._left._normalize_slot_name(*a, **k)
 
-        纯认知图操作，不调用向量库，不需要原始 query。
-
-        Parameters
-        ----------
-        slot_mem_ids:
-            SearchCogGraph 返回的 slot 候选 ID 集合。
-        classification:
-            SearchCogGraph 返回的分类结果（使用其中的 entities 字段）。
-
-        Returns
-        -------
-        set[str]
-            最终候选 ID 集合。
-            - 有实体 → slot ∪ entity
-            - 无实体 → 直接返回 slot_mem_ids
-        """
-        final_ids, _activated_names = self._search_data_impl(slot_mem_ids, classification)
-        return final_ids
-
-    def _search_data_impl(
-        self, slot_mem_ids: set[str], classification: QueryClassification,
-    ) -> tuple[set[str], list[str]]:
-        """SearchData() 的真正实现，多返回一个"左脑真正激活的实体名字列表"
-        （含模糊匹配命中 + 一跳邻居扩散），供 Search() 内部传给右脑用。
-
-        这跟 classification.entities（query 文本里的字面实体提及）不同——右脑
-        依赖的是左脑检索管线真正确认/扩散出来的实体集合。SearchData() 公开方法
-        只返回 memory id，维持原有 step-by-step 管线契约不变。
-        """
-        store = self._get_repo()._cognitive_store
-        if not classification.entities or store is None:
-            return set(slot_mem_ids), []
-
-        entity_mids: set[str] = set()
-        matched_entity_ids: set[str] = set()
-        activated_names: list[str] = []
-        if hasattr(store, "find_entities_by_name_fuzzy"):
-            for ent_name in classification.entities:
-                ents = store.find_entities_by_name_fuzzy(self._user_id, ent_name)
-                if ents:
-                    ids = [e.id for e in ents]
-                    matched_entity_ids.update(ids)
-                    activated_names.extend(e.name for e in ents)
-                    mids = store.memory_ids_for_entities(ids)
-                    entity_mids.update(mids)
-
-        # 一跳邻居扩散：把直接匹配实体的一跳邻居（entity_edges）的记忆也并进候选池，
-        # 一视同仁不加权，排序交给 Rank() 的向量相似度；邻居也计入 activated_names。
-        if matched_entity_ids and hasattr(store, "neighbor_entity_ids"):
-            neighbor_ids = store.neighbor_entity_ids(self._user_id, list(matched_entity_ids))
-            if neighbor_ids:
-                entity_mids.update(store.memory_ids_for_entities(neighbor_ids))
-                for nid in neighbor_ids:
-                    ne = store.get_entity(nid)
-                    if ne:
-                        activated_names.append(ne.name)
-
-        if not entity_mids:
-            return set(slot_mem_ids), activated_names
-
-        if slot_mem_ids:
-            if _pool_mode() == "strict":
-                # entity narrowing：实体池对 slot 池做交集缩窄；交集太小就信实体不信 slot。
-                inter = entity_mids & slot_mem_ids
-                if len(inter) >= _STRICT_MIN_INTERSECTION:
-                    return inter, activated_names
-                return entity_mids, activated_names
-            return entity_mids | slot_mem_ids, activated_names
-        return entity_mids, activated_names
-
-    # ── Step 2.5: 时间类问题扩候选 ────────────────────────────────────────────
-
-    def _widen_for_time_question(self, query: str, final_ids: set[str]) -> set[str]:
-        """问"多久 / 什么时候"时，把库里含时长或日期表达的记忆并进候选池。
-
-        entity 和 slot 都按语义内容建索引，抓不住时间表达。这里按问题类型补一次
-        正则扫库，把含时长/日期表达的记忆并进候选。final_ids 为空时走全库兜底，不扩。
-        """
-        if not final_ids:
-            return final_ids
-        from voicemem.leftbrain.local_memory_store import time_question_kind
-
-        kind = time_question_kind(query)
-        if kind is None:
-            return final_ids
-        store = self._get_repo()._vector_store
-        if not hasattr(store, "memory_ids_with_time_expr"):
-            return final_ids
-        extra = store.memory_ids_with_time_expr(self._user_id, kind=kind)
-        return (final_ids | extra) if extra else final_ids
-
-    # ── Step 3: 向量排序 ──────────────────────────────────────────────────────
-
-    def Rank(
-        self,
-        query: str,
-        candidate_ids: set[str],
-        top_k: int = 5,
-        speaker_filter: str | None = None,
-    ) -> list[MemorySearchHit]:
-        """在 candidate_ids 范围内做向量相似度排序，返回 top-N 记忆。"""
-        fetch_k = max(top_k * 3, 20)   # 全库兜底时多拉候选
-        repo = self._get_repo()
-
-        if candidate_ids:
-            # 名额选择交给存储层：top_k 个按纯余弦发，额外补最多 _RESCUE_K 条被
-            # 词面/时间加分救回来的（必须在完整候选集上做，避免二次截断丢分）。
-            hits = repo._vector_store.search(
-                query,
-                user_id=self._user_id,
-                top_k=top_k,
-                rescue_k=_RESCUE_K,
-                memory_id_filter=candidate_ids,
-            )
-            # 不足时从全库补齐——但按人过滤时不能这样做（会把其他人的记忆混进来），
-            # 这种情况下宁可结果数少于 top_k。
-            if len(hits) < top_k and not speaker_filter:
-                seen = {h.memory_id for h in hits}
-                for h in repo.search(query, user_id=self._user_id, top_k=fetch_k):
-                    if h.memory_id not in seen:
-                        hits.append(h)
-                        seen.add(h.memory_id)
-                        if len(hits) >= top_k:
-                            break
-        else:
-            hits = repo.search(query, user_id=self._user_id, top_k=fetch_k)[:top_k]
-
-        final_hits = hits[:top_k]
-        # 记忆生命周期：检索命中增加热度，读取时按 last_hit_at 指数衰减、低热度归档。
-        cog_store = repo._cognitive_store
-        if cog_store is not None and hasattr(cog_store, "record_memory_hits"):
-            try:
-                cog_store.record_memory_hits([h.memory_id for h in final_hits])
-            except Exception as e:
-                print(f"[MemoryHeat] 记录失败: {e}")
-        return final_hits
-
-    # ── v5：LLM 打标签（替代 embedding 相似度） ───────────────────────────────
-
-    # base-7 slot 的中文别名——用于构造 "english / 中文" 短锚点文本算 embedding。
-    # 短标签对短标签的余弦相似度才够高，能让翻译变体折叠回同一个 slot。
-    _BASE_SLOT_ALIASES: dict[str, str] = {
-        "work": "工作", "finance": "财务", "relationships": "关系",
-        "health": "健康", "goals": "目标", "daily_life": "日常生活",
-        "knowledge": "知识",
-    }
-
-    def _get_slot_base_embeddings(self) -> dict[str, list[float]]:
-        """base-7 slot 的 embedding，缓存一次。key 用字面枚举值（"relationships"），
-        不能直接 str(枚举成员)——SlotV2.RELATIONSHIPS 的 __str__ 是 "SlotV2.RELATIONSHIPS"
-        不是 "relationships"，会导致折叠命中后写回一个不存在的 slot 名字。"""
-        with self._lock:
-            if "slot_base_embeddings" not in self._cache:
-                self._cache["slot_base_embeddings"] = {
-                    value: self._embed_text(f"{value} / {alias}")
-                    for value, alias in self._BASE_SLOT_ALIASES.items()
-                }
-        return self._cache["slot_base_embeddings"]
-
-    def _get_slot_dyn_embeddings(self, dynamic: list[tuple[str, str]]) -> dict[str, list[float]]:
-        """已涌现动态 slot 的 embedding，增量缓存（新 slot 出现才补算）。"""
-        with self._lock:
-            cache = self._cache.setdefault("slot_dyn_embeddings", {})
-        for name, desc in dynamic:
-            if name not in cache:
-                cache[name] = self._embed_text(f"{name}：{desc}" if desc else name)
-        return cache
-
-    def _normalize_slot_name(
-        self, candidate: str, known_all: set[str], dynamic: list[tuple[str, str]],
-        threshold: float = 0.65,
-    ) -> str:
-        """精确匹配失败时按语义相似度把候选 slot 折叠回最接近的已知 slot（避免翻译/
-        措辞漂移把同一类别拆成两份），只有真正找不到相近的才当作全新 slot。
-        """
-        if candidate in known_all:
-            return candidate
-
-        from voicemem.leftbrain.slot_split.split_manager import cosine_sim
-        cand_emb = self._embed_text(candidate)
-
-        best_name, best_sim = None, -1.0
-        for name, emb in self._get_slot_base_embeddings().items():
-            sim = cosine_sim(cand_emb, emb)
-            if sim > best_sim:
-                best_sim, best_name = sim, name
-        for name, emb in self._get_slot_dyn_embeddings(dynamic).items():
-            sim = cosine_sim(cand_emb, emb)
-            if sim > best_sim:
-                best_sim, best_name = sim, name
-
-        return best_name if best_name is not None and best_sim >= threshold else candidate
-
-    def _llm_tag_memories(self, text: str, memory_ids: list[str]) -> list[str]:
-        """用 LLM 给这批记忆打 slot 标签，只能从已知 slot（固定 + 已建好的动态
-        slot）里选 1-2 个，不允许 LLM 自造新类别（新 slot 只能由 SubgraphManager
-        的共现子图判定产生）。返回实际打上的 slot 名称列表。
-        """
-        import json as _json
-        from voicemem.leftbrain.cognitive_graph.slot_v2 import ALL_SLOT_V2_VALUES, SLOT_V2_DESCRIPTIONS
-
-        dynamic = self._get_dynamic_slots()  # [(name, description), ...]
-        dyn_names = {n for n, _ in dynamic}
-        known_all = set(ALL_SLOT_V2_VALUES) | dyn_names
-
-        # 构建 slot 列表描述
-        slot_lines = [f"- {s}: {SLOT_V2_DESCRIPTIONS[s][:60]}" for s in ALL_SLOT_V2_VALUES]
-        if dynamic:
-            slot_lines += [f"- {n}: {d}" for n, d in dynamic]
-        slot_desc = "\n".join(slot_lines)
-
-        prompt = (
-            f"用户说了这句话：\n「{text}」\n\n"
-            f"请从下面列表里选最贴近的 1-2 个生活领域（必须选列表里已有的，"
-            f"选最接近的即可，不要自创新类别）：\n{slot_desc}\n\n"
-            '只输出 JSON：{"slots": ["类别1", "类别2"]}'
-        )
-        raw = self._llm_json(prompt)
-        if not raw:
-            return []
-
-        try:
-            slots = _json.loads(raw).get("slots", [])
-        except Exception:
-            return []
-
-        slots = [s.strip() for s in slots if s.strip()][:2]
-        if not slots:
-            return []
-
-        # 精确匹配失败的候选先按语义相似度折叠回已知 slot；折叠后仍不在已知列表
-        # 里的（LLM 自造了新名字）直接丢弃——新 slot 的创造完全交给子图机制。
-        slots = [self._normalize_slot_name(s, known_all, dynamic) for s in slots]
-        slots = [s for s in slots if s in known_all]
-        slots = list(dict.fromkeys(slots))  # 去重保序
-        if not slots:
-            return []
-
-        cog_store = self._get_repo()._cognitive_store
-
-        # 覆盖写入标签（覆盖 embedding 打的旧标签）
-        if cog_store and hasattr(cog_store, "upsert_memory_tags"):
-            for mid in memory_ids:
-                cog_store.upsert_memory_tags(
-                    mid, self._user_id, [(s, 0.95) for s in slots]
-                )
-        return slots
+    def _llm_tag_memories(self, *a, **k) -> list[str]:
+        return self._left._llm_tag_memories(*a, **k)
 
     # ── 查询分类（含动态 slot） ────────────────────────────────────────────────
 
-    def Classify(self, query: str) -> QueryClassification:
-        """LLM 分类 query → slots + entities，分层进行：
-        1. 先只在 base-7 里选（不摊平全部动态 slot，避免列表越滚越长）。
-        2. 每选中一个 slot，就往它的子 slot（子图机制分裂出来的）再钻一层，
-           有比当前层更精确的子 slot 就往下钻，没有就停。
-        3. 钻到的子 slot 追加进结果，父 slot 保留不丢——父 slot 兜住召回，
-           子 slot 提供指向性，检索端对多 slot 取并集。
-        entities 只在第 1 步提取一次。
-        """
-        from voicemem.leftbrain.cognitive_graph.query_slot_classifier import (
-            QuerySlotClassifier, SlotClassifierConfig, QueryClassification,
-        )
-        # 可注入分类器（默认内置 LLM 版）。和 embedder 对称：传本地实现即切成
-        # 本地模型，不碰 LLM/网络——这一步（抽 slot + entity）从此可 OpenAI 可本地。
-        clf = self._classifier or QuerySlotClassifier(SlotClassifierConfig(base_url=self._base_url))
-        top = clf.classify(query)
-
-        dyn_store = self._get_dynamic_slot_store()
-        final_slots = []
-
-        def _add(name: str) -> None:
-            if name not in final_slots:
-                final_slots.append(name)
-
-        # 子 slot 下钻需要分类器支持 classify_child（本地版没有就整体跳过）。
-        _emergence_on = hasattr(clf, "classify_child")
-        for slot in top.slots:
-            _add(slot)
-            if not _emergence_on:
-                continue
-            current = slot
-            seen = {current}
-            while True:
-                children = dyn_store.get_children(self._user_id, current)
-                children = [c for c in children if c.name not in seen]
-                if not children:
-                    break
-                choice = clf.classify_child(
-                    query, current, [(c.name, c.description) for c in children]
-                )
-                if choice is None:
-                    break
-                current = choice
-                seen.add(current)
-                _add(current)
-
-        return QueryClassification(slots=final_slots, entities=top.entities)
-
-    _SUBGRAPH_POOL_NS = "subgraph_pool"
+    def Classify(self, *a, **k) -> QueryClassification:
+        """LLM 分类 query → slots + entities，转发到 LeftBrain.Classify。"""
+        return self._left.Classify(*a, **k)
 
     def PrimeSubgraphFromQuery(self, query: str, top_k: int = 10) -> dict:
         """Classify()+Search() 的便捷封装，返回这次检索记账的条数。
@@ -909,83 +506,17 @@ class VoiceMem:
         )
         return {"status": "recorded", "count": len({h.memory_id for h in result.hits})}
 
-    def _record_subgraph_activation(self, hits: list) -> None:
-        """检索结果记账：把命中 memory 对应的 graph_entity 记进 session 的子图
-        候选池 + 查询激活历史（供簇涌现的密度公式用）。便宜，无 LLM 调用。
-        由 Search() 本体每次真实检索后自动执行。
-        """
-        memory_ids = {h.memory_id for h in hits}
-        if not memory_ids:
-            return
-        tracker = self._get_session_tracker()
-        for mid in memory_ids:
-            tracker.touch(self._user_id, self._SUBGRAPH_POOL_NS, mid)
-        try:
-            graph_store = self._get_graph_entity_store()
-            activated: set[str] = set()
-            for mid in memory_ids:
-                activated.update(e.id for e in graph_store.get_entities_for_memory(self._user_id, mid))
-            if activated:
-                import uuid as _uuid
-                session_id = self._get_session_tracker().get_current_session(self._user_id)
-                graph_store.record_query_activation(
-                    self._user_id, _uuid.uuid4().hex, list(activated), session_id=session_id,
-                )
-        except Exception as e:
-            print(f"[QueryActivation] 记录失败: {e}")
+    def _record_subgraph_activation(self, *a, **k) -> None:
+        """检索结果记账，转发到 LeftBrain._record_subgraph_activation。"""
+        return self._left._record_subgraph_activation(*a, **k)
 
-    def RunSubgraphCheckpoint(self) -> dict:
-        """把攒下的 memory_id 名单整个取出（并清空），做一次真正的建图→判断——
-        这是子图判定"贵"的那一步，真实产品里应在每个 session 结束时调一次。
-        """
-        tracker = self._get_session_tracker()
-        memory_ids = set(tracker.pop_touched(self._user_id, self._SUBGRAPH_POOL_NS))
-        if not memory_ids:
-            return {"status": "no_memories"}
+    def RunSubgraphCheckpoint(self, *a, **k) -> dict:
+        """子图 checkpoint（建图→判断），转发到 LeftBrain.RunSubgraphCheckpoint。"""
+        return self._left.RunSubgraphCheckpoint(*a, **k)
 
-        cog_store = self._get_repo()._cognitive_store
-
-        def _mem_lookup(mid: str) -> str | None:
-            if cog_store is None:
-                return None
-            rec = cog_store.get_memory_record(mid)
-            return rec.content if rec else None
-
-        session_id = self._get_session_tracker().get_current_session(self._user_id)
-        return self._get_subgraph_manager().run_for_retrieved_pool(
-            self._user_id, memory_ids, memory_content_lookup=_mem_lookup, session_id=session_id,
-        )
-
-    def ArchiveColdMemories(
-        self, *, min_age_days: float = 30.0, heat_threshold: float | None = None,
-    ) -> dict:
-        """记忆生命周期的归档一步：扫衰减后热度低于阈值、且存在够久的记忆，
-        调 mem0 的 expiration_date 归档（mem0 的 search()/get_all() 会自动隐藏
-        过期记忆）。判定在 list_archivable_memories，这里只负责执行；显式调用
-        的批处理操作，不在每次 Ingest()/Search() 里自动跑。
-        """
-        cog_store = self._get_repo()._cognitive_store
-        if cog_store is None or not hasattr(cog_store, "list_archivable_memories"):
-            return {"status": "no_cognitive_store", "archived": []}
-
-        from voicemem.leftbrain.cognitive_graph.store import ARCHIVE_HEAT_THRESHOLD
-        threshold = ARCHIVE_HEAT_THRESHOLD if heat_threshold is None else heat_threshold
-
-        candidate_ids = cog_store.list_archivable_memories(
-            self._user_id, min_age_days=min_age_days, heat_threshold=threshold,
-        )
-        if not candidate_ids:
-            return {"status": "nothing_to_archive", "archived": []}
-
-        vector_store = self._get_repo()._vector_store
-        archived: list[str] = []
-        for mid in candidate_ids:
-            try:
-                if hasattr(vector_store, "archive_memory") and vector_store.archive_memory(mid):
-                    archived.append(mid)
-            except Exception as e:
-                print(f"[Archive] {mid} 归档失败: {e}")
-        return {"status": "archived" if archived else "archive_failed", "archived": archived}
+    def ArchiveColdMemories(self, *a, **k) -> dict:
+        """冷记忆归档，转发到 LeftBrain.ArchiveColdMemories。"""
+        return self._left.ArchiveColdMemories(*a, **k)
 
     # ── 完整 pipeline ──────────────────────────────────────────────────────────
 
@@ -1036,18 +567,18 @@ class VoiceMem:
             except Exception:
                 pass
 
-        # ① slot 过滤
-        t0 = time.time()
-        slot_mem_ids, classification = self.SearchCogGraph(
-            slots or [], entities, scene_filter=scene_filter, speaker_filter=speaker_filter,
+        # ①②+摘要 左脑检索段（SearchCogGraph→SearchData→时间扩候选→相关槽摘要）
+        # 整段抽进 LeftBrain.search；实体缩窄先于右脑跑完（右脑依赖左脑"已激活"的
+        # 实体集合），t0/t1/t2 由组件回传，timing 语义不变。
+        left = self._left.search(
+            query, slots, entities, scene_filter, speaker_filter,
         )
-        t1 = time.time()
-
-        # ② 实体缩窄——先于右脑跑完。右脑依赖左脑"已激活"的实体集合，必须等
-        # _search_data_impl() 产出真正在左脑图里查到/扩散出来的那批实体。
-        final_ids, activated_names = self._search_data_impl(slot_mem_ids, classification)
-        final_ids = self._widen_for_time_question(query, final_ids)
-        t2 = time.time()
+        slot_mem_ids      = left["slot_mem_ids"]
+        final_ids         = left["final_ids"]
+        activated_names   = left["activated_names"]
+        classification    = left["classification"]
+        related_summaries = left["related_summaries"]
+        t0, t1, t2 = left["t0"], left["t1"], left["t2"]
 
         # ③ 右脑（依赖 activated_names）与 Rank（向量排序，依赖 final_ids）并发执行——
         # 两者互不依赖对方输出，可以并发。
@@ -1055,15 +586,14 @@ class VoiceMem:
         rb_directive = ""
         rb_duration  = 0.0
 
-        # 右脑检索段已抽进 RightBrain.search（build_query_plan→retrieve→关系/情绪
-        # 特质/画像图层→按 priority 截断，返回 (rb_hits, rb_directive)）；这里只保留
-        # 与 Rank 并发跑的 ThreadPoolExecutor 结构，把右脑那半换成组件调用。
+        # 右脑检索段已抽进 RightBrain.search、向量排序已抽进 LeftBrain.rank；这里只
+        # 保留 Rank ‖ 右脑 并发跑的 ThreadPoolExecutor 结构，两半都换成组件调用。
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             rb_future = pool.submit(
                 self._right.search, query, activated_names, emotion, top_k,
             )                                            # 右脑并发开跑
 
-            hits = self.Rank(query, final_ids, top_k, speaker_filter=speaker_filter)
+            hits = self._left.rank(query, final_ids, top_k, speaker_filter=speaker_filter)
             t3 = time.time()
 
             rb_hits, rb_directive = rb_future.result()   # 等右脑完成（通常已经跑完了）
@@ -1085,30 +615,6 @@ class VoiceMem:
                 "若检索内容不能真正回答问题，请直接说不知道，不要猜测。"
             )
             rb_directive = f"{rb_directive}\n{hint}".strip()
-
-        # 相关槽摘要：优先用从数据共现自动学出来的宏观连接；学出来的关联不够
-        # （冷启动）时退回静态表兜底（动态 slot 静态表查不到，关联回其父 slot）。
-        primary = classification.primary_slot()
-        related_summaries: dict[str, str] = {}
-        if primary:
-            store = self._get_repo()._cognitive_store
-            # 路由到的全部 slot + 主 slot 的 ≤3 个强连接 slot，各附一句 schema 描述。
-            wanted: list[str] = list(classification.slots or [primary])
-            related_slots: list[str] = []
-            if store is not None and hasattr(store, "get_macro_related_slots"):
-                related_slots = store.get_macro_related_slots(self._user_id, primary)
-            if not related_slots:
-                if primary in SLOT_RELATIONS:
-                    related_slots = SLOT_RELATIONS[primary]
-                else:
-                    related_slots = self._get_dynamic_slot_store().get_parent_slots(self._user_id, primary)
-            for r_ in related_slots[:3]:
-                if r_ not in wanted:
-                    wanted.append(r_)
-            if wanted and store is not None and hasattr(store, "get_slot_summaries"):
-                got = store.get_slot_summaries(self._user_id, wanted)
-                related_summaries = {s_: got[s_] for s_ in wanted if got.get(s_)}
-
 
         # 场景自适应回复风格（audiomem）：读取用户当前场景，生成 directive
         scene_directive = ""
@@ -1151,43 +657,8 @@ class VoiceMem:
     # ── 写入 ──────────────────────────────────────────────────────────────────
 
     def _get_user_name(self) -> str | None:
-        """从左脑记忆中提取用户名字，命中后缓存。"""
-        with self._lock:
-            if "user_name" in self._cache:
-                return self._cache["user_name"]
-
-        import re, sqlite3 as _sql
-        name: str | None = None
-        try:
-            db_path = self._memory_root / "voicemem_leftbrain.sqlite"
-            if db_path.exists():
-                conn = _sql.connect(db_path)
-                rows = conn.execute(
-                    "SELECT text FROM memories WHERE user_id=? LIMIT 300",
-                    (self._user_id,),
-                ).fetchall()
-                conn.close()
-                patterns = [
-                    r"我叫([^\s，。！？,.]{1,6})",
-                    r"叫我([^\s，。！？,.]{1,6})",
-                    r"我的名字[叫是]([^\s，。！？,.]{1,6})",
-                    r"[Mm]y name is ([A-Za-z]{2,15})",
-                    r"[Ii]'?m ([A-Z][a-z]{1,14})",
-                ]
-                for (text,) in rows:
-                    for pat in patterns:
-                        m = re.search(pat, text)
-                        if m:
-                            name = m.group(1).strip()
-                            break
-                    if name:
-                        break
-        except Exception:
-            pass
-
-        with self._lock:
-            self._cache["user_name"] = name
-        return name
+        """从左脑记忆中提取用户名字，转发到 LeftBrain（共享 _cache 里 "user_name"）。"""
+        return self._left._get_user_name()
 
     @staticmethod
     def _is_english(text: str) -> bool:
@@ -1402,7 +873,7 @@ class VoiceMem:
         environment_hint = ctx.get("environment_hint", "")
 
         import uuid
-        from voicemem.utils.common.voice_input import VoiceInput, VoiceContent, ingest_voice_input
+        from voicemem.utils.common.voice_input import VoiceInput, VoiceContent
 
         vi = VoiceInput(
             id=f"utt_{uuid.uuid4().hex[:8]}",
@@ -1415,11 +886,11 @@ class VoiceMem:
             environment=environment,
         )
 
-        result = ingest_voice_input(
-            vi, self._user_id,
+        # 左脑事实抽取 + 入库（ingest_voice_input）抽进 LeftBrain.ingest_facts；
+        # registry 是音频侧声纹姓名映射（跨域），由 engine 编排时注入。
+        result = self._left.ingest_facts(
+            vi,
             registry=self._get_registry(),
-            repo=self._get_repo(),
-            extractor=self._get_extractor(),
             session_id=session_id,
             extra_metadata={"created_at": observed_at} if observed_at else None,
         )
@@ -1492,46 +963,8 @@ class VoiceMem:
         return self._audio._write_audiomem_tags(*a, **k)
 
     def _write_left_brain(self, result, text) -> None:
-        """左脑写入段：LLM 打 slot 标签 + slot→entity 图层写入。"""
-        if not result.memory_ids:
-            return
-        # LLM 打标签（覆盖 embedding 标签）
-        try:
-            llm_slots = self._llm_tag_memories(text, result.memory_ids)
-            primary_slot = llm_slots[0] if llm_slots else None
-        except Exception as e:
-            print(f"[v5] LLM 打标签失败: {e}", flush=True)
-            primary_slot = None
-            llm_slots = []
-
-        # 语义簇宏观连接：这条记忆同时打了 2 个以上 slot 标签，说明这几个 slot
-        # 之间存在真实关联，从数据共现自动学，不是人工写死的关系表。
-        if len(llm_slots) >= 2:
-            try:
-                self._get_repo()._cognitive_store.record_slot_cooccurrence(
-                    self._user_id, llm_slots
-                )
-            except Exception as e:
-                print(f"[SlotMacro] 共现记录失败: {e}", flush=True)
-
-        # 左脑 slot→entity 图层：把这条记忆挂到对应slot下的entity节点
-        # （entity 名字复用 CognitiveAnnotator 已经抽取好的实体，不额外调LLM）
-        try:
-            cog_store = self._get_repo()._cognitive_store
-            graph_store = self._get_graph_entity_store()
-            if cog_store is not None and primary_slot:
-                for mid in result.memory_ids:
-                    for eid in cog_store.entity_ids_for_memory(mid):
-                        ent = cog_store.get_entity(eid)
-                        if ent is None:
-                            continue
-                        ent_emb = self._embed_text(ent.name)
-                        g_ent, _created = graph_store.get_or_create_entity_semantic(
-                            self._user_id, primary_slot, ent.name, ent_emb,
-                        )
-                        graph_store.link_memory(g_ent.id, self._user_id, mid)
-        except Exception as e:
-            print(f"[GraphEntity] 左脑图层写入失败: {e}")
+        """左脑写入段（LLM 打 slot 标签 + slot→entity 图层），转发到 LeftBrain.write。"""
+        return self._left.write(result, text)
 
     def _write_right_brain(self, emotion, result, text, entities, observed_at) -> None:
         """右脑写入段，转发到 RightBrain.write。"""
@@ -1566,71 +999,9 @@ class VoiceMem:
         except Exception as e:
             print(f"[Attribution] 长期归因失败: {e}")
 
-    _SCHEMA_DESC_MIN_NEW = 1      # slot 新增 ≥N 条记忆才重写描述
-    _SCHEMA_DESC_MAX_FACTS = 80   # 摘要输入上限（最近的在前）
-
     def _refresh_schema_descriptions(self) -> None:
-        """给记忆数有变化的 slot 重写一句综合描述，写入 cognitive store 的 slot_summaries。
-        描述语言跟随记忆语言；带该领域最近一条记忆的日期，避免 temporal 题被无日期的
-        概括带偏。"""
-        repo = self._get_repo()
-        cog = repo._cognitive_store
-        if cog is None or not hasattr(cog, "memory_ids_for_slots_v2"):
-            return
-        entries = {}
-        try:
-            for e in repo._vector_store.list_entries(user_id=self._user_id):
-                entries[e["id"]] = e
-        except Exception:
-            entries = {}
-        slots = list(SLOT_RELATIONS.keys())
-        try:
-            slots += [d.name for d in self._get_dynamic_slot_store().get_dynamic_slots(self._user_id)]
-        except Exception:
-            pass
-        for slot in dict.fromkeys(slots):
-            try:
-                mids = cog.memory_ids_for_slots_v2(self._user_id, [slot])
-                n = len(mids)
-                if n < 3:
-                    continue
-                last = cog.get_slot_summary_mem_count(self._user_id, slot) if hasattr(cog, "get_slot_summary_mem_count") else 0
-                if n - last < self._SCHEMA_DESC_MIN_NEW:
-                    continue
-                facts = []
-                for mid in mids:
-                    e = entries.get(mid)
-                    if e is not None and e["text"]:
-                        facts.append((e["date"], e["text"]))
-                    else:
-                        rec = cog.get_memory_record(mid) if hasattr(cog, "get_memory_record") else None
-                        if rec and rec.content:
-                            facts.append(("", rec.content))
-                if len(facts) < 3:
-                    continue
-                facts.sort(key=lambda t: t[0], reverse=True)
-                facts = facts[: self._SCHEMA_DESC_MAX_FACTS]
-                latest = next((d for d, _ in facts if d), "")
-                sample = "\n".join(f"- {('[' + d + '] ') if d else ''}{t}" for d, t in facts)
-                en = _is_en_text(" ".join(t for _, t in facts[:10]))
-                prompt = (
-                    f"Below are memory facts about a user, all under the life domain '{slot}'.\n"
-                    "Write ONE concise sentence (max 40 words) summarizing the overall picture in this domain: "
-                    "the main people, ongoing situations, and how things changed over time. Plain and factual, "
-                    "no fluff. Mention the most recent date if relevant. Output only the sentence.\n\n"
-                    if en else
-                    f"以下是用户在「{slot}」这个维度上的记忆事实。\n"
-                    "请用一句话（40字以内）概括这个维度的整体情况：主要人物、正在进行的事、随时间的变化。"
-                    "平实、有依据、不抒情；如相关请带上最近的日期。只输出这一句。\n\n"
-                ) + sample
-                text = (self._llm_text(prompt) or "").strip()
-                if not text:
-                    continue
-                if latest and latest not in text:
-                    text = f"{text} (latest: {latest})" if en else f"{text}（最近：{latest}）"
-                cog.upsert_slot_summary(self._user_id, slot, text, n)
-            except Exception as e:
-                print(f"[SchemaDesc] {slot} 失败: {e}")
+        """给记忆数有变化的 slot 重写一句综合描述，转发到 LeftBrain。"""
+        return self._left._refresh_schema_descriptions()
 
     def Flush(self) -> None:
         """对话/会话正式结束时调用一次，补跑最后一个 session 漏掉的批处理
