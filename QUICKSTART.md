@@ -1,46 +1,43 @@
-# 最快本地启动（语音 + 脑图 web demo）
+# 最快本地启动（语音 + 脑图 demo）
 
-## 0. 一次性准备（只做一次，跑完不用再管）
+## 0. 一次性准备（只做一次）
 
 ```bash
 cd voicemem_opensource
-export OPENAI_API_KEY=sk-...          # 你的 key
-bash scripts/setup.sh                 # 装依赖 + 下所有模型（ASR/VAD/声纹/E5，约 1GB，一次）
+export OPENAI_API_KEY=sk-...                # 你的 key
+pip install -e ".[demo,audio,environment,voiceprint]"   # demo 依赖（sherpa ASR/VAD + 本地 E5）
+bash scripts/download_models.sh models      # ASR/VAD/声纹模型（从 HuggingFace 断点续传）
+# 本地 E5 记忆/投机模型（intfloat/multilingual-e5-small）首次运行自动下，无需手动
 ```
 
-> 只想先用「打字」测试、不下 1GB 模型？跳过 `setup.sh`，直接 `pip install -e .` 即可
-> （语音识别用不了，但打字通道能跑通记忆+脑图+回复）。
+> 只想先用「打字」测试、不下 sherpa 模型？跑 `pip install -e ".[demo]"` 即可
+> （语音识别用不了，但打字通道能跑通记忆 + 脑图 + 回复）。
 
-## 1. 每次启动：开两个终端
+> 换过 demo？本版把记忆向量换成**本地 384 维 E5**（投机预取的 0–500ms 预算内不能走网络）。
+> 若你之前用旧 demo（OpenAI 1536 维）跑过、留下了记忆库，维度不兼容——先清掉记忆目录再跑。
 
-**终端 A — 语音后端（:8787）**
-```bash
-cd openai_voice_demo/backend
-export OPENAI_API_KEY=sk-...
-export VOICEMEM_SKIP_STARTUP_CHECK=1     # 跳过启动自检（否则组件偏慢时会停在 y/N 提示挡住启动）
-python main.py            # 等到打印 "Uvicorn running on http://0.0.0.0:8787"
-```
+## 1. 启动（一个进程）
 
-**终端 B — 网页（:8000）**
 ```bash
 cd web
 export OPENAI_API_KEY=sk-...
-python server.py          # 打印 "voicemem demo -> http://localhost:8000/"
+DEMO_MODE=llm_tts python run.py             # http://localhost:8787
+# 想要更快更自然的原生语音： DEMO_MODE=realtime python run.py  （需 Realtime API 权限）
 ```
 
 ## 2. 用
 
-浏览器打开 **http://localhost:8000/**
+浏览器打开 **http://localhost:8787/**
 
 - **打字**：在「流式输入」框里输入回车 —— 无需麦克风/ASR，只需 OpenAI。
-- **语音**：点右下「开始对话」→ 允许麦克风 → 直接说话（需已跑过 `setup.sh`）。
+- **语音**：点右下「开始对话」→ 允许麦克风 → 直接说话（需已下模型）。
 
-左脑按 SlotV2 槽实时长节点 + 栏板填充，右脑长情绪/经历/偏好节点，中间四块流式更新，AI 语音回复。
+左脑按 SlotV2 槽实时长节点 + 栏板填充，右脑长情绪/经历/画像节点，中间四块流式更新，AI 语音回复。
 
 ## 排查
 
-- 点「开始对话」秒退回待机 / 状态显示 `code=1006` → **终端 A 的后端没在跑**。确认它打印了 `Uvicorn running on ...:8787` 且没退出。
-- 后端卡住不动、最后是一张「启动自检」表格 → 它在等你按 `y/N`。按 `y` 回车放行，或用上面的 `VOICEMEM_SKIP_STARTUP_CHECK=1` 直接跳过。
-- 状态显示「请用 http://localhost:8000 打开」→ 别双击 html 文件，要走 :8000。
-- 想连别的机器/端口的后端：`http://localhost:8000/?ws=主机:端口`。
+- 点「开始对话」秒退回待机 / `code=1006` → demo 进程没在跑，确认它打印了 `-> http://localhost:8787/`。
+- 「请用 http://localhost:8000 打开」这类提示 → 别双击 html 文件，走 http://localhost:8787。
 - 用 Chrome / Edge 最稳。
+- 还想要桌面浮球 / pipeline·realtime 的完整后端，见 `openai_voice_demo/`。
+```

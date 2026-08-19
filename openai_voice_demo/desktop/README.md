@@ -53,7 +53,7 @@ comes back the same way.
 # 1. voicemem_opensource + this demo's own Python deps, same as running the
 #    web version (see ../README.md) -- must be importable by whatever
 #    python VOICEMEM_PYTHON below resolves to. Pipeline mode also needs the
-#    local ASR models: `bash scripts/download_models.sh service/models`
+#    local ASR models: `bash scripts/download_models.sh models`
 #    from the repo root (see ../README.md).
 cd .. && pip install -e ../.. && pip install -r requirements.txt
 cp .env.example .env   # fill in OPENAI_API_KEY at minimum

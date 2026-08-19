@@ -61,20 +61,19 @@ voiceprint = [
     "funasr",
     "modelscope",
 ]
-# service/ WebSocket backend (Gemini Live): ASR/VAD, speaker/emotion signals.
-service = [
-    "websockets",
-    "jieba",
-    "model2vec",
+# web/ — the minimal EOU-anticipatory voice demo (FastAPI WS + brain-graph
+# html). Local streaming ASR + Silero VAD (sherpa-onnx) drive the 0–500ms
+# speculative memory prefetch, which runs on a LOCAL E5 embedder + LOCAL slot
+# classifier (sentence-transformers) so nothing in the hot path hits the
+# network. Reply is OpenAI (chat+TTS, or Realtime).
+demo = [
+    "fastapi",
+    "uvicorn",
+    "openai",
     "sherpa-onnx",
-    "funasr",
-    "torch",
-    "google-genai",
+    "sentence-transformers",
+    "soundfile",
 ]
 
 [tool.setuptools.packages.find]
-include = ["voicemem_core*"]
-
-# 引擎是 voicemem_core 包；voicemem.py 是顶层「前台」模块（import voicemem 即得）。
-[tool.setuptools]
-py-modules = ["voicemem"]
+include = ["voicemem*"]

@@ -21,8 +21,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from voicemem_core.core import VoiceMem
-from voicemem_core.voice_input import VoiceIngestResult
+from voicemem.engine import VoiceMem
+from voicemem.utils.common.voice_input import VoiceIngestResult
 
 
 def _ctx(**overrides) -> dict:
@@ -62,7 +62,7 @@ class HeartnotePureEmotionTests(unittest.TestCase):
             voice_id="v1", memory_ids=[], facts_count=0,
             begin_time="12:00:00", end_time="12:00:00", slots=[], messages_count=1,
         )
-        with patch("voicemem_core.voice_input.ingest_voice_input", return_value=no_fact_result), \
+        with patch("voicemem.utils.common.voice_input.ingest_voice_input", return_value=no_fact_result), \
              patch.object(self.vm, "_generate_inner_os", return_value=""):
             self.vm._finish_ingest(_ctx())
 
@@ -78,7 +78,7 @@ class HeartnotePureEmotionTests(unittest.TestCase):
             voice_id="v1", memory_ids=["mem_123"], facts_count=1,
             begin_time="12:00:00", end_time="12:00:00", slots=[], messages_count=1,
         )
-        with patch("voicemem_core.voice_input.ingest_voice_input", return_value=with_fact_result), \
+        with patch("voicemem.utils.common.voice_input.ingest_voice_input", return_value=with_fact_result), \
              patch.object(self.vm, "_generate_inner_os", return_value=""):
             self.vm._finish_ingest(_ctx())
 
@@ -91,7 +91,7 @@ class HeartnotePureEmotionTests(unittest.TestCase):
             voice_id="v1", memory_ids=[], facts_count=0,
             begin_time="12:00:00", end_time="12:00:00", slots=[], messages_count=1,
         )
-        with patch("voicemem_core.voice_input.ingest_voice_input", return_value=no_fact_result), \
+        with patch("voicemem.utils.common.voice_input.ingest_voice_input", return_value=no_fact_result), \
              patch.object(self.vm, "_generate_inner_os", return_value=""):
             self.vm._finish_ingest(_ctx(emotion=""))
 

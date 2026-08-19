@@ -1,7 +1,7 @@
 """Local streaming ASR + VAD for pipeline mode's input side -- replaces the
 OpenAI Realtime transcription session (cloud ASR) with the same sherpa-onnx
 stack `service/` already uses (streaming zipformer bilingual zh-en + Silero
-VAD, model files already in `service/models/`, fetched by
+VAD, model files already in `models/`, fetched by
 `scripts/download_models.sh`).
 
 Why: measured with the cloud transcription session, "user stops speaking ->
@@ -41,8 +41,8 @@ TURN_SILENCE_S = 0.5
 EARLY_HINT_S = 0.2
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_DEFAULT_ASR_DIR = _REPO_ROOT / "service" / "models" / "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20"
-_DEFAULT_VAD_MODEL = _REPO_ROOT / "service" / "models" / "silero_vad.onnx"
+_DEFAULT_ASR_DIR = _REPO_ROOT / "models" / "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20"
+_DEFAULT_VAD_MODEL = _REPO_ROOT / "models" / "silero_vad.onnx"
 
 # The recognizer holds the model weights (~100MB, 1-3s load); share one per
 # process across connections (each connection gets its own stream/VAD state).
@@ -57,7 +57,7 @@ def _get_recognizer():
         if not d.is_dir():
             raise RuntimeError(
                 f"local ASR model dir not found: {d} -- run "
-                "`bash scripts/download_models.sh service/models` from the repo root"
+                "`bash scripts/download_models.sh models` from the repo root"
             )
         _RECOGNIZER = sherpa_onnx.OnlineRecognizer.from_transducer(
             tokens=str(d / "tokens.txt"),
@@ -101,7 +101,7 @@ class LocalASR:
         if not Path(_DEFAULT_VAD_MODEL).is_file():
             raise RuntimeError(
                 f"silero VAD model not found: {_DEFAULT_VAD_MODEL} -- run "
-                "`bash scripts/download_models.sh service/models` from the repo root"
+                "`bash scripts/download_models.sh models` from the repo root"
             )
         self._vad = sherpa_onnx.VoiceActivityDetector(
             sherpa_onnx.VadModelConfig(

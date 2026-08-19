@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """如何加载 Qwen2.5-Omni 并接进 voicemem 的多模态情绪归因层。
 
-voicemem.emotion.attribution_qwen_omni.QwenOmniEmotionAttributor 用依赖注入
+voicemem.utils.audio.emotion.attribution_qwen_omni.QwenOmniEmotionAttributor 用依赖注入
 接收已经加载好的 processor/model/tokenizer，本身不负责下载/加载模型权重。
 这个脚本展示最小可跑通的加载方式，替代直接把音频塞进多模态 LLM 做情绪归因。
 
@@ -75,8 +75,8 @@ def main() -> None:
     parser.add_argument("--device-map", default="auto")
     args = parser.parse_args()
 
-    from voicemem_core.emotion.attribution_qwen_omni import QwenOmniEmotionAttributor
-    from voicemem_core.emotion.types import VAD, TurnEmotionRecord
+    from voicemem.utils.audio.emotion.attribution_qwen_omni import QwenOmniEmotionAttributor
+    from voicemem.utils.audio.emotion.types import VAD, TurnEmotionRecord
 
     processor, tokenizer, model = load_omni(args.model, dtype=args.dtype, device_map=args.device_map)
     attributor = QwenOmniEmotionAttributor(processor=processor, model=model, tokenizer=tokenizer)

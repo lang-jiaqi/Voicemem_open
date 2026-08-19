@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from voicemem_core.core import VoiceMem
+from voicemem.engine import VoiceMem
 
 
 class ClapEnvironmentFallbackTests(unittest.TestCase):

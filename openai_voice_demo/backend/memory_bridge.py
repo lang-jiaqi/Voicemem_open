@@ -10,7 +10,7 @@ import uuid
 
 from config import Config
 
-from voicemem_core import VoiceMem, SearchResult
+from voicemem.engine import VoiceMem, SearchResult
 
 from audio_utils import write_wav_file
 from local_classifier import LocalSlotClassifier
