@@ -11,6 +11,10 @@
   <a href="QUICKSTART.md">语音 Demo 🎙️</a>
 </p>
 
+<p align="center">
+  <a href="https://huggingface.co/LangJiaqi77/Voicemem-Qwen3_6-35B-A3B-QLoRA-v2"><img src="https://img.shields.io/badge/HuggingFace-Model-FFD21E?logo=huggingface&logoColor=black" alt="HF Model"></a>&nbsp;<a href="https://lang-jiaqi.github.io/Voicemem_open/"><img src="https://img.shields.io/badge/Project-Page-blue" alt="Project Page"></a>&nbsp;<img src="https://img.shields.io/badge/License-Apache%202.0-green" alt="License">&nbsp;<a href="https://github.com/lang-jiaqi/Voicemem_open"><img src="https://img.shields.io/github/stars/lang-jiaqi/Voicemem_open?style=social" alt="GitHub stars"></a>&nbsp;<a href="#"><img src="https://img.shields.io/badge/WeChat-Join%20Group-07C160?logo=wechat&logoColor=white" alt="WeChat"></a>&nbsp;<a href="#"><img src="https://img.shields.io/badge/X-VoiceMem-black?logo=x&logoColor=white" alt="X"></a>
+</p>
+
 ---
 
 我们带来 **VoiceMem**，为语音模型增加最后一个组件：灵魂，让它真正越来越懂你。VoiceMem 建立在
