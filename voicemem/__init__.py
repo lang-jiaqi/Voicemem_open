@@ -35,6 +35,7 @@ _LAZY: dict[str, str] = {
     "AudioPerception":          "voicemem.utils.audio.perceiver:AudioPerception",
     "VoiceStream":              "voicemem.stream:VoiceStream",
     "Turn":                     "voicemem.stream:Turn",
+    "StreamState":              "voicemem.stream:StreamState",
 
     # ── 语音接入适配层（上游语音模块结构化输出 → 左脑注入）──
     "VoiceInput":               "voicemem.utils.common.voice_input:VoiceInput",
