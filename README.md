@@ -3,21 +3,20 @@ test
 VoiceMem is a memory framework for conversational agents built around a
 **left-brain / right-brain split**:
 
-- **Left brain** (`voicemem_core/leftbrain/`) — structured factual memory: entity
+- **Left brain** (`voicemem/leftbrain/`) — structured factual memory: entity
   extraction, a cognitive graph over "slots" (topics, unified under one
   7-value taxonomy — see `cognitive_graph/slot_v2.py`), retrieval by
   slot-classification + entity-narrowing. Raw facts are stored via
   [mem0](https://github.com/mem0ai/mem0) with a local/embedded Qdrant vector
   store (`leftbrain/mem0_backend_store.py`); the cognitive graph itself
   references mem0's memory ids rather than duplicating storage.
-- **Right brain** (`voicemem_core/rightbrain/`, `voicemem_core/emotion/`) — episodic /
+- **Right brain** (`voicemem/rightbrain/`, `voicemem/utils/audio/emotion/`) — episodic /
   emotional memory: per-turn valence-arousal tracking, anomaly detection, and
   memory attribution for emotionally significant turns.
-- **Fusion** (`voicemem_core/fusion/`) — orchestrates both hemispheres into a
+- **Fusion** (`voicemem/fusion/`) — orchestrates both hemispheres into a
   single `Search()` / `Ingest()` API and builds the final prompt context.
-- **Persona / prestimulus** (`voicemem_core/persona/`, `voicemem_core/prestimulus/`) —
-  a standing user-preference snapshot and pre-loaded task context injected
-  ahead of retrieval.
+  (The user profile / persona lives in the right brain as a `source="profile"`
+  hit, retrieved by query like any other slot — no separate pre-stimulus layer.)
 
 ## Beyond text: an audio-native perception layer
 
@@ -50,45 +49,51 @@ Set `OPENAI_API_KEY` (optionally `OPENAI_BASE_URL` / `OPENAI_MODEL` /
 `OPENAI_EMBEDDING_MODEL`) — the left-brain extraction/classification and
 retrieval ranking call the OpenAI-compatible chat/embeddings API.
 
-## Two layers: `voicemem` (front-desk) vs `voicemem_core` (engine)
+## API structure: `VoiceMem` = left_brain / right_brain / utils
 
-- **`voicemem`** — the front-desk (`voicemem.py`): all capabilities wrapped as
-  flat, directly-callable functions returning plain dicts/lists. This is what
-  demos and quick usage import.
-- **`voicemem_core`** — the engine package: the actual implementation
-  (`VoiceMem` class, left/right-brain, fusion, audio-native components). Use it
-  when you need fine-grained control.
+`voicemem/core.py` is a small, readable top layer; the heavy implementation
+lives in `voicemem/engine.py` and is only delegated to.
+
+- **`VoiceMem`** — top entry. Takes `api_key`, `mode`, and per-util overrides.
+- **`.left_brain` / `.right_brain`** — each has `search()` / `store()`.
+- **`.utils`** — the swappable capabilities: entity / schema / ASR / emotion /
+  voiceprint / embedding / **memory_engine** (mem0 by default; pass another to
+  use e.g. zep). Each defaults to a builtin; override by passing a function.
+- **`mode`** ∈ `left_brain_single` / `text_mode` / `multi_modal` — decides which
+  utils load. Utils load lazily, only when needed.
 
 ## Quick start
 
 ```python
-import voicemem                       # 前台：扁平函数
+from voicemem import VoiceMem
 
-voicemem.ingest("Had ramen with Alex near the office at noon.")
-for hit in voicemem.search("what did I eat for lunch"):
-    print(hit)                        # {"text": ..., "score": ...}
+vm = VoiceMem(api_key="sk-...", mode="text_mode")
+vm.ingest("Had ramen with Alex near the office at noon.")
+
+for hit in vm.left_brain.search("what did I eat for lunch"):
+    print(hit)                        # left-brain facts
+
+vm.test()                             # startup self-check: 4-tier speed table
 ```
 
-Need full control? Use the engine directly:
+Swap a util by passing a function (default is a builtin):
 
 ```python
-from voicemem_core import VoiceMem
-vm = VoiceMem()
-result = vm.Search("what did I eat for lunch", slots=["food"])
+vm = VoiceMem(mode="text_mode",
+              embedding=lambda: MyEmbedder(),
+              memory_engine=lambda: MyZepStore())   # replace mem0
 ```
 
 Memory is stored under `memory/leftbrain/` by default (mem0/Qdrant for raw
 facts, SQLite for the cognitive graph and right-brain data); override the
 root with the `VOICEMEM_MEMORY_ROOT` environment variable.
 
-## Where the front-desk meets the voice layer
+## Components
 
-The engine's components are all exported from `voicemem_core`, so
-`from voicemem_core import <Component>` works for all of them — the audio-native
-ones (`SpeakerEncoder`, `ASTEnvironmentDetector`, …) load lazily, so plain
-`import voicemem_core` never pulls in torch/sherpa and the text-only core
-install stays light. See `voicemem_core/__init__.py` for the full component
-directory.
+Every engine component is also exported lazily from the package, so
+`from voicemem import SpeakerEncoder` etc. works — the audio-native ones load
+lazily, so plain `import voicemem` never pulls in torch/sherpa and the
+text-only core install stays light. See `voicemem/__init__.py`.
 
 `Ingest()` is a three-step pipeline: **preprocess → assemble → write**. The
 first step is a standalone, public **streaming-preprocessing** seam that runs
@@ -118,10 +123,10 @@ vm.IngestEnv(audio_path="turn.wav")       # background-scene detection only
 ```
 
 `speaker_encoder.py` extracts a 192-dim 3D-Speaker ERes2Net embedding for each
-utterance via a worker subprocess (`voicemem_core/voiceprint/campplus_worker.py`,
+utterance via a worker subprocess (`voicemem/utils/audio/voiceprint/campplus_worker.py`,
 kept separate because it needs `sherpa-onnx`). The worker reads the ONNX
-weights from `service/models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx`
-by default — run `bash scripts/download_models.sh service/models` once to
+weights from `models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx`
+by default — run `bash scripts/download_models.sh models` once to
 fetch it (this works whether or not you use `service/`), or point
 `VOICEMEM_SPEAKER_MODEL` at a model file elsewhere. By default the worker
 runs in the same interpreter (`sys.executable`); to isolate it into a
@@ -154,26 +159,24 @@ python examples/ingest_audio.py path/to/turn.wav --text "..." --ingest   # + ful
 
 ## Demos
 
-Two independent, working demos build on top of `voicemem_core/` — neither is
-required to use the core package as a library.
+**[`web/`](web/)** — the single, minimal demo: `run.py` (core conversation logic)
++ `utils.py` (pipeline) + one brain-graph `index.html` (rendering only). Talk to
+it, watch the left/right-brain graph grow live. It shows the **EOU-anticipatory
+0–500ms pipeline**: local streaming ASR + Silero VAD drive a *speculative* memory
+prefetch that runs on a LOCAL E5 embedder + a LOCAL slot classifier (injected via
+`VoiceMem(embedding=…, schema=LocalQueryClassifier(…))`) — so nothing in the hot
+path hits the network, and the LLM `Classify` is skipped. By the time VAD confirms
+end-of-utterance, the memory is already fetched off the critical path; the two
+dead-simple control flows (`voicemem_llm_tts`, `voicemem_realtime`) just *consume*
+it and reply. Barge-in (a mid-utterance pause then resume) cancels the speculation
+instead of firing a turn. See [QUICKSTART.md](QUICKSTART.md).
 
-**[`openai_voice_demo/`](openai_voice_demo/)** — the actively-maintained
-reference demo: an OpenAI-based (GPT-4o pipeline or Realtime API) voice
-conversation loop with a browser frontend and an Electron desktop wrapper.
-See its own README for setup and architecture. On launch it first runs a
-per-component **startup self-check** (`voicemem_core/startup_check.py`) that times
-each component against a speed budget and prints a short console report: if all
-pass it starts directly, otherwise it asks whether to launch anyway. Set
-`VOICEMEM_SKIP_STARTUP_CHECK=1` to skip it, or `VOICEMEM_STARTUP_BUDGET_<KEY>`
-to tune a budget.
-
-**[`service/`](service/)** — an independent, Gemini Live-based WebSocket
-backend (ASR, VAD, speaker/emotion signals, memory retrieval, voice replies).
-It streams microphone PCM audio in and JSON/PCM frames out; the protocol is
-documented in [`docs/PROTOCOL.md`](docs/PROTOCOL.md). This repo does not
-currently bundle a browser client for it — see
-[`service/README.md`](service/README.md) for how to run the backend and what
-you'd need to build or bring your own frontend against it.
+**[`openai_voice_demo/`](openai_voice_demo/)** — the full reference demo:
+OpenAI-based (GPT-4o pipeline or Realtime API) voice loop with a browser
+frontend, an Electron desktop floating-orb, and `.app` packaging. Heavier; keep
+it around when you want the battle-tested pipeline/realtime backends. On launch
+it runs the per-component **startup self-check** (`voicemem/startup_check.py`);
+set `VOICEMEM_SKIP_STARTUP_CHECK=1` to skip.
 
 ## License
 

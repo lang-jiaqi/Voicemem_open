@@ -13,13 +13,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from voicemem_core.core import VoiceMem
+from voicemem.orchestrator import Orchestrator
 
 
 class ClapEnvironmentFallbackTests(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        self.vm = VoiceMem(memory_root=self.tmp, user_id="u1")
+        self.vm = Orchestrator(memory_root=self.tmp, user_id="u1")
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)

@@ -16,8 +16,8 @@ from pathlib import Path
 
 import numpy as np
 
-from voicemem_core.voiceprint import l2norm
-from voicemem_core.voiceprint_store import VoiceprintStore
+from voicemem.utils.audio.voiceprint import l2norm
+from voicemem.utils.audio.voiceprint.voiceprint_store import VoiceprintStore
 
 
 def _noisy(rng: np.random.Generator, base: np.ndarray, std: float) -> np.ndarray:

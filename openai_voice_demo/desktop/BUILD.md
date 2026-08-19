@@ -24,7 +24,7 @@ OpenAI（不是离线）。
 cd openai_voice_demo/backend
 pip install pyinstaller
 # 本地 ASR / 嵌入模型（onedir 里要能找到，或首启联网下载）
-bash ../../scripts/download_models.sh ../../service/models
+bash ../../scripts/download_models.sh ../../models
 ```
 
 ## ① 冻结后端（最容易反复的一层）

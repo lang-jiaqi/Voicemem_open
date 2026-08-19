@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 # exclusive file lock on it, so a second mem0-backed process (a running demo
 # server, or this script twice) dies with "already accessed by another instance
 # of Qdrant client". Nothing here needs that collection. Must be set before
-# voicemem_core -> mem0 is imported, which is why every voicemem import in this
+# voicemem -> mem0 is imported, which is why every voicemem import in this
 # file is deferred into a function.
 os.environ.setdefault("MEM0_TELEMETRY", "False")
 
@@ -75,7 +75,7 @@ def make_vm(user_key: str, memory_root: Path):
     """A text-only VoiceMem: the five audio perception heads are off, so this
     runs without the acoustic model stack. Emotion labels come from the corpus
     (standing in for the acoustic head) and are passed to Ingest directly."""
-    from voicemem_core import VoiceMem
+    from voicemem.core import VoiceMem
     return VoiceMem(
         memory_root=memory_root / user_key,
         user_id=user_key,
@@ -131,14 +131,11 @@ def build_case_context(result) -> str:
              if ln.strip() and all(ln.strip() not in h.content for h in result.rb_hits)]
     if extra:
         blocks.append("\n".join(extra))
-    if result.prestimulus_text:
-        blocks.append("PRE-STIMULUS — persona and standing preferences:\n" +
-                      result.prestimulus_text)
     return "\n\n".join(blocks)
 
 
 def run_turn(vm, case: dict) -> dict:
-    from voicemem_core import build_memory_context
+    from voicemem import build_memory_context
     utterance = case["input"]
     t0 = time.time()
     c = vm.Classify(utterance)
@@ -162,7 +159,7 @@ def run_turn(vm, case: dict) -> dict:
             for h in result.rb_hits
         ],
         "rb_directive": result.rb_directive,
-        "prestimulus": result.prestimulus_text,
+        "prestimulus": "",
         "memory_context": build_case_context(result),
         "library_context": build_memory_context(result),
         "retrieval_ms": retrieval_ms,

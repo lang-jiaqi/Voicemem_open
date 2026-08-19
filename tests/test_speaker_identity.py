@@ -1,6 +1,6 @@
 import unittest
 
-from voicemem_core.speaker_identity import parse_self_identification
+from voicemem.utils.audio.voiceprint.speaker_identity import parse_self_identification
 
 
 class SpeakerIdentityTests(unittest.TestCase):
