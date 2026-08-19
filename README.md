@@ -30,6 +30,7 @@
 
 * **[Quick Start](#quick-start)**
 * **[Architecture](#architecture)**
+* **[Models](#models)**
 * **[三种输入接口](#interfaces)**
 * **[Demo](#demo)**
 * **[Released Model](#released-model)**
@@ -85,6 +86,19 @@ orchestrator.py    编排实现（把三组件串成 Search/Ingest pipeline）
   传一个函数就换成自己的（本地模型、别的向量库…）。
 - **读写分离**：抽取事实、更新摘要、刷新描述等「慢而智能」的 LLM 活儿都在写入侧；读（检索）路径
   0 次 LLM、走本地向量，实测 Search 本体 ~10ms。
+
+## Models
+
+每个能力都**可插拔**——本地开源 ↔ API，一行 config 就切换。完整清单（哪个功能有哪些模型选项）见
+**[docs/MODELS.md](docs/MODELS.md)**。速览：
+
+- **语音感知**(ASR / VAD / 声纹 / 声学场景) = **纯本地开源**（`bash scripts/download_models.sh models` 从官方拉）;
+- **记忆**(embedding / slot 分类 / 事实抽取) = **默认 OpenAI API，但都有本地开源替代**（E5 / 本地分类器 / 本地 LLM）;
+- **回复**(对话 LLM / TTS / Realtime) = demo 层，LLM/TTS 可本地可 API，Realtime 目前仅 OpenAI。
+
+```python
+VoiceMem.from_config({"embedding": {"provider": "local"}, "slots": {"provider": "local"}})   # 记忆全本地
+```
 
 ## 三种输入接口 <a id="interfaces"></a>
 
