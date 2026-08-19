@@ -74,7 +74,7 @@ class Memory:
 
     def __init__(self, user_id: str = "default", memory_root: str | None = None,
                  audio_native: bool = False, **voicemem_kwargs: Any) -> None:
-        from voicemem.engine import VoiceMem
+        from voicemem.core import VoiceMem
         self.user_id = user_id
         self._vm = VoiceMem(
             memory_root=memory_root,

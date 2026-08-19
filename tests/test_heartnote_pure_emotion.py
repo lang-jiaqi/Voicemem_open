@@ -21,7 +21,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from voicemem.engine import VoiceMem
+from voicemem import VoiceMem
 from voicemem.utils.common.voice_input import VoiceIngestResult
 
 

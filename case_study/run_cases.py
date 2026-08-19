@@ -75,7 +75,7 @@ def make_vm(user_key: str, memory_root: Path):
     """A text-only VoiceMem: the five audio perception heads are off, so this
     runs without the acoustic model stack. Emotion labels come from the corpus
     (standing in for the acoustic head) and are passed to Ingest directly."""
-    from voicemem.engine import VoiceMem
+    from voicemem.core import VoiceMem
     return VoiceMem(
         memory_root=memory_root / user_key,
         user_id=user_key,

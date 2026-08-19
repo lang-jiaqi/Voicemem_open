@@ -41,7 +41,7 @@ def run_perception_only(audio_path: Path) -> None:
 
 
 def run_full_ingest(audio_path: Path, text: str) -> None:
-    from voicemem.engine import VoiceMem
+    from voicemem.core import VoiceMem
 
     vm = VoiceMem()
     result = vm.Ingest(text, audio_path=str(audio_path))

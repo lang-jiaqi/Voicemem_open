@@ -128,7 +128,7 @@ class _Ctx:
         if self.vm is None and not self._vm_built:
             self._vm_built = True
             try:
-                from voicemem.engine import VoiceMem
+                from voicemem.core import VoiceMem
                 self.vm = VoiceMem()
             except Exception as e:
                 raise SkipProbe(f"VoiceMem 构造失败: {e}")

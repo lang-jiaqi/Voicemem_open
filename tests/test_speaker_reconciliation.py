@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-from voicemem.engine import VoiceMem
+from voicemem import VoiceMem
 from voicemem.utils.audio.voiceprint import l2norm
 from voicemem.utils.audio.voiceprint.voiceprint_store import VoiceprintStore
 

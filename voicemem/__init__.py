@@ -24,12 +24,12 @@ from typing import TYPE_CHECKING
 # 每个组件都登记在这里；__getattr__ 在首次访问时按需 import，并缓存进本模块
 # 命名空间，之后就是普通属性访问，没有额外开销。
 _LAZY: dict[str, str] = {
-    # ── 核心（顶层 API 在 core.py；SearchResult 等数据结构在 engine.py）──
+    # ── 核心（顶层编排器 + 数据结构都在 core.py；LeftBrain/RightBrain 为真组件）──
     "VoiceMem":                 "voicemem.core:VoiceMem",
     "Utils":                    "voicemem.core:Utils",
-    "LeftBrain":                "voicemem.core:LeftBrain",
-    "RightBrain":               "voicemem.core:RightBrain",
-    "SearchResult":             "voicemem.engine:SearchResult",
+    "LeftBrain":                "voicemem.leftbrain.brain:LeftBrain",
+    "RightBrain":               "voicemem.rightbrain.brain:RightBrain",
+    "SearchResult":             "voicemem.core:SearchResult",
     "RightBrainHit":            "voicemem.rightbrain.brain:RightBrainHit",
     "AudioPerception":          "voicemem.utils.audio.perceiver:AudioPerception",
 
@@ -127,7 +127,7 @@ def __dir__() -> list[str]:
 
 # 让静态类型检查器 / IDE 也能看到这些名字（运行期不执行，不触发重依赖）。
 if TYPE_CHECKING:  # pragma: no cover
-    from voicemem.engine import SearchResult, VoiceMem
+    from voicemem.core import SearchResult, VoiceMem
     from voicemem.rightbrain.brain import RightBrainHit
     from voicemem.utils.audio.perceiver import AudioPerception
     from voicemem.utils.audio.emotion import (
