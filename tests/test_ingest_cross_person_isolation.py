@@ -13,8 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import patch
 
-from voicemem_core.leftbrain.extract_facts_openai import ExtractedAdditiveMemory
-from voicemem_core.voice_input import (
+from voicemem.leftbrain.extract_facts_openai import ExtractedAdditiveMemory
+from voicemem.utils.common.voice_input import (
     VoiceContent,
     VoiceInput,
     VoiceprintRegistry,
@@ -90,7 +90,7 @@ class IngestCrossPersonIsolationTests(unittest.TestCase):
         ])
 
         with patch(
-            "voicemem_core.leftbrain.extract_facts_openai.ConflictResolver.resolve",
+            "voicemem.leftbrain.extract_facts_openai.ConflictResolver.resolve",
             return_value=[],
         ) as mock_resolve:
             result = ingest_voice_input(
@@ -129,7 +129,7 @@ class IngestCrossPersonIsolationTests(unittest.TestCase):
         ])
 
         with patch(
-            "voicemem_core.leftbrain.extract_facts_openai.ConflictResolver.resolve",
+            "voicemem.leftbrain.extract_facts_openai.ConflictResolver.resolve",
             return_value=[],
         ) as mock_resolve:
             ingest_voice_input(

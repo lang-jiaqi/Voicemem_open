@@ -73,7 +73,7 @@ if __name__ == "__main__":
     # 有组件偏慢/异常则在 console 询问是否仍启动。设
     # VOICEMEM_SKIP_STARTUP_CHECK=1 可整体跳过自检。
     if os.environ.get("VOICEMEM_SKIP_STARTUP_CHECK", "") not in ("1", "true", "True"):
-        from voicemem_core.startup_check import check_and_gate
+        from voicemem.startup_check import check_and_gate
         if not check_and_gate(memory_bridge.vm):
             raise SystemExit("[openai_voice_demo] 启动已被用户在自检后取消。")
     print(f"[openai_voice_demo] mode={config.voice_mode} audio_native={config.audio_native} "

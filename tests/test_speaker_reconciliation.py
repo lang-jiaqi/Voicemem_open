@@ -13,9 +13,9 @@ from pathlib import Path
 
 import numpy as np
 
-from voicemem_core.core import VoiceMem
-from voicemem_core.voiceprint import l2norm
-from voicemem_core.voiceprint_store import VoiceprintStore
+from voicemem.orchestrator import Orchestrator
+from voicemem.utils.audio.voiceprint import l2norm
+from voicemem.utils.audio.voiceprint.voiceprint_store import VoiceprintStore
 
 
 def _noisy(rng: np.random.Generator, base: np.ndarray, std: float) -> np.ndarray:
@@ -51,7 +51,7 @@ def _build_split_pair(rng, true_voice, match_thr=0.50, cand_thr=0.40, store=None
 class ReconcileSpeakerCandidatesTests(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        self.vm = VoiceMem(
+        self.vm = Orchestrator(
             memory_root=self.tmp, user_id="test",
             enable_scene=False, enable_music=False,
             enable_abnormal_sound=False, enable_voiceprint=True, enable_emotion=False,
@@ -115,8 +115,8 @@ class ReconcileSpeakerCandidatesTests(unittest.TestCase):
         # 直接建 CognitiveGraphStoreV2 写测试标签。memory_tags 对 memories.id
         # 有外键约束，先插两条最小的占位记忆。
         from types import SimpleNamespace
-        from voicemem_core.leftbrain.cognitive_graph.store_v2 import CognitiveGraphStoreV2
-        from voicemem_core.leftbrain.cognitive_graph.slot_v2 import SlotV2
+        from voicemem.leftbrain.cognitive_graph.store_v2 import CognitiveGraphStoreV2
+        from voicemem.leftbrain.cognitive_graph.slot_v2 import SlotV2
         cog_store = CognitiveGraphStoreV2(self.vm._cognitive_db)
         cog_store.upsert_memory_record("test", "mem_1", SlotV2.KNOWLEDGE, "Nancy said something")
         cog_store.upsert_memory_record("test", "mem_2", SlotV2.KNOWLEDGE, "Nancy said something else")

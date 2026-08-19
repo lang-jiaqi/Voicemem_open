@@ -57,30 +57,6 @@ def dump_user(user_key: str, memory_root: Path) -> None:
     else:
         print("\nRIGHT BRAIN: (no right_brain.sqlite)")
 
-    for name, path in (("PRE-STIMULUS PROFILES", root / "prestimulus_profiles.sqlite"),):
-        if not path.exists():
-            print(f"\n{name}: (none)")
-            continue
-        con = sqlite3.connect(path)
-        con.row_factory = sqlite3.Row
-        cols = {r[1] for r in con.execute("PRAGMA table_info(user_profiles)")}
-        col = "content" if "content" in cols else list(cols)[0]
-        rows = con.execute(
-            f"SELECT {col} AS c FROM user_profiles WHERE user_id = ?", (user_key,)
-        ).fetchall()
-        print(f"\n{name}: {len(rows)} entries")
-        for r in rows:
-            print("  - " + str(r["c"]).replace("\n", "\n    ")[:600])
-        con.close()
-
-    persona = root / "persona.json"
-    if persona.exists():
-        doc = json.loads(persona.read_text(encoding="utf-8"))
-        print(f"\nPERSONA (v{doc.get('version')}, confidence={doc.get('confidence')}):")
-        print("  " + str(doc.get("impression_text", ""))[:800])
-        for h in doc.get("interaction_hints", []):
-            print(f"  · {h}")
-
     vm = make_vm(user_key, memory_root)
     try:
         store = vm._get_repo()._cognitive_store

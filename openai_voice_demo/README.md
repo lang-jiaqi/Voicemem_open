@@ -60,7 +60,7 @@ pip install -e .
 pip install -r openai_voice_demo/requirements.txt
 
 # 3. local streaming-ASR models (~570MB, one time)
-bash scripts/download_models.sh service/models
+bash scripts/download_models.sh models
 
 # 4. your key
 cp openai_voice_demo/.env.example openai_voice_demo/.env
