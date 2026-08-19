@@ -10,16 +10,13 @@
 注意：记忆向量用本地 384 维 E5（投机预算内不能走网络）。换过旧 demo（OpenAI 1536 维）留了
 记忆库的，维度不兼容——先清掉记忆目录再跑。
 """
-import asyncio
 import base64
 import json
 import os
 import sys
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
-import numpy as np
 import uvicorn
 
 HERE = Path(__file__).resolve().parent
@@ -30,7 +27,6 @@ os.environ.setdefault("VOICEMEM_MODELS_DIR", str(_ROOT / "models"))
 
 import utils                                         # noqa: E402  同目录管道层
 from voicemem import VoiceMem                        # noqa: E402
-from voicemem.memory_api import build_memory_context  # noqa: E402
 
 MODE = os.environ.get("DEMO_MODE", "llm_tts")        # llm_tts | realtime
 SPEC_MIN_CHARS, GAMBLE_S, CONFIRM_S = 6, 0.20, 0.50  # partial 起投机 / 赌说完 / VAD 确认结束
@@ -112,68 +108,36 @@ async def voicemem_realtime(pending, conn, send, send_audio):
     vm.ingest(pending.text)
 
 
-# ══════════════════ 投机预取 + anticipatory 状态机（VAD 版 voicemem 逻辑）══════════════
-
-async def speculate(text, spoken=True):
-    """本地投机检索：注入的本地分类器出 slots(+entities) + 本地 E5 向量 Search（0 LLM/网络）。
-    放线程里跑，好和继续读麦克风真正并发（这才叫"边听边预取"）。"""
-    t0 = time.time()
-
-    def work():
-        c = vm.classify(text)                                 # 本地 LocalQueryClassifier
-        r = vm.search(text, slots=c.slots, entities=c.entities)
-        return r, build_memory_context(r)
-
-    result, ctx = await asyncio.to_thread(work)
-    print(f"[speculate] {text[:24]!r} -> {len(result.hits)} hits  {(time.time()-t0)*1000:.0f}ms", flush=True)
-    return Pending(text, ctx, result, spoken)
-
+# ══════════════════ 驱动 voicemem 核心流式会话（vm.stream()）══════════════════
+# ASR + VAD + 0–500ms 投机预取（边说边预取 / 200ms 赌说完 / barge-in / 500ms 确认）
+# 全在核心 VoiceStream 里。这里只做 demo 该做的：搬 socket 帧、发 partial、把说完
+# 的一轮包成 Pending 交给控制流——demo 就是核心的使用示例，不再平行重写一套。
 
 async def anticipate(sock, on_frame=None):
-    """本地 ASR+VAD 驱动的回合状态机，逐个 yield 确认回合的 Pending。
+    """驱动核心流式会话，逐个 yield 确认回合的 Pending。
     on_frame(raw24k)：realtime 用它把原始音频平行喂给 OpenAI（方案 A）。"""
-    asr = vm.utils.get("asr"); vad = utils.make_vad(); asr.reset()
-    text, silence, spoke = "", 0.0, False
-    spec, spec_text = None, ""
-
-    async def confirm(spoken):
-        try:
-            return await (spec or speculate(text, spoken))
-        except asyncio.CancelledError:
-            return await speculate(text, spoken)
-
+    stream = vm.stream(spec_min_chars=SPEC_MIN_CHARS, gamble_s=GAMBLE_S, confirm_s=CONFIRM_S)
+    last_partial = ""
     while True:
         msg = await sock.receive()
         if msg.get("text"):                                   # 打字轮
             data = json.loads(msg["text"])
             if data.get("type") == "user_text" and data.get("text", "").strip():
-                yield await speculate(data["text"], spoken=False)
+                turn = await stream.feed_text(data["text"])
+                yield Pending(turn.text, turn.memory_context, turn.result, spoken=False)
             continue
         if msg.get("bytes") is None:
             continue
         raw = msg["bytes"]
         if on_frame:
             await on_frame(raw)                               # 方案 A：音频也进 OpenAI 缓冲
-        frame = utils.resample(np.frombuffer(raw, np.int16).astype(np.float32) / 32768.0)
-        text = asr.feed(frame)
-        if vad.is_speech(frame):
-            if silence > 0 and spec:                          # barge-in：又开口了 → 丢弃这次投机
-                spec.cancel(); spec, spec_text = None, ""
-            spoke, silence = True, 0.0
-        else:
-            silence += len(frame) / 16000.0
-        if text.strip():
-            await sock.send_json({"type": "partial_transcript", "text": text, "replace": True})
-        # 边说边预取 / 200ms 赌说完补发
-        if spoke and text.strip() and text != spec_text and \
-                (silence == 0.0 and len(text) >= SPEC_MIN_CHARS or silence >= GAMBLE_S):
-            if spec:
-                spec.cancel()
-            spec_text = text
-            spec = asyncio.create_task(speculate(text))
-        if spoke and silence >= CONFIRM_S and text.strip():   # VAD 确认说完 → 交出预算记忆
-            yield await confirm(spoken=True)
-            asr.reset(); text, silence, spoke, spec, spec_text = "", 0.0, False, None, ""
+        st = await stream.feed(raw)                           # 核心：ASR + VAD + 投机预取
+        if st.text.strip() and st.text != last_partial:
+            last_partial = st.text
+            await sock.send_json({"type": "partial_transcript", "text": st.text, "replace": True})
+        if st.turn:                                           # VAD 确认说完 → 记忆早已预取好
+            last_partial = ""
+            yield Pending(st.turn.text, st.turn.memory_context, st.turn.result, spoken=True)
 
 
 # ══════════════════ 每种 mode 的会话循环 ══════════════════
