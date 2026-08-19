@@ -125,4 +125,4 @@ VoiceMem 记忆工作流微调的 QLoRA adapter：
 
 ## License
 
-**MIT** — 见 [LICENSE](LICENSE)。你可以用 VoiceMem 做任何事 🎉
+本项目以 **Apache License 2.0** 开源 — 见 [LICENSE](LICENSE)。用 VoiceMem 尽情构建 🎉
