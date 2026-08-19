@@ -33,6 +33,8 @@ _LAZY: dict[str, str] = {
     "SearchResult":             "voicemem.orchestrator:SearchResult",
     "RightBrainHit":            "voicemem.rightbrain.brain:RightBrainHit",
     "AudioPerception":          "voicemem.utils.audio.perceiver:AudioPerception",
+    "VoiceStream":              "voicemem.stream:VoiceStream",
+    "Turn":                     "voicemem.stream:Turn",
 
     # ── 语音接入适配层（上游语音模块结构化输出 → 左脑注入）──
     "VoiceInput":               "voicemem.utils.common.voice_input:VoiceInput",

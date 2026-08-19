@@ -79,6 +79,11 @@ class VoiceMem:
     def preprocess(self, text, audio=None):   return self._o.preprocess(text, audio_path=audio)
     def flush(self):                          return self._o.Flush()
 
+    def stream(self, **kw):
+        """流式输入途径：喂音频块 / 文字 → 说完时得到 Turn（记忆结果）。见 voicemem/stream.py。"""
+        from voicemem.stream import VoiceStream
+        return VoiceStream(self, **kw)
+
     def test(self):
         """启动自检：只测本 mode 需要的 util，打印 4 档速度表。"""
         from voicemem.startup_check import run_util_report
