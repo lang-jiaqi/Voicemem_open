@@ -18,6 +18,7 @@ from pydantic import BaseModel
 HERE = Path(__file__).resolve().parent
 CHAT_MODEL = os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o")
 TTS_MODEL = os.environ.get("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
+TTS_BACKEND = os.environ.get("TTS_BACKEND", "openai")   # openai(api) | local(离线小模型)
 RT_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime")
 client = AsyncOpenAI()
 
@@ -76,10 +77,38 @@ async def llm_stream(text, ctx):
 
 
 async def tts_stream(text):
+    """可切换 TTS：默认走 OpenAI api；设 TTS_BACKEND=local 走离线本地小模型。
+    两条都吐 24kHz PCM16 流，前端一视同仁播放。"""
+    backend = _local_tts_stream if TTS_BACKEND == "local" else _openai_tts_stream
+    async for chunk in backend(text):
+        yield chunk
+
+
+async def _openai_tts_stream(text):
+    """在线 api：OpenAI TTS（gpt-4o-mini-tts），response_format=pcm 就是 24k PCM16。"""
     async with client.audio.speech.with_streaming_response.create(
             model=TTS_MODEL, voice="alloy", input=text, response_format="pcm") as resp:
         async for chunk in resp.iter_bytes():
             yield chunk
+
+
+@lru_cache(maxsize=1)
+def _piper_voice():
+    """离线小模型：默认 piper（纯离线 onnx，中英皆可）。装：pip install piper-tts；
+    VOICEMEM_TTS_MODEL 指向 voice 的 .onnx。想换 kokoro / edge-tts 等，只改这个函数
+    和下面 _local_tts_stream 的取样即可。piper api 随版本，对照其文档。"""
+    from piper import PiperVoice
+    return PiperVoice.load(os.environ["VOICEMEM_TTS_MODEL"])
+
+
+async def _local_tts_stream(text):
+    """离线本地 TTS：合成 → 重采样到 24k → 分块 yield，接口和在线版完全一致。"""
+    v = _piper_voice()
+    sr = getattr(getattr(v, "config", None), "sample_rate", 22050)
+    for raw in v.synthesize_stream_raw(text):          # 同步生成器，int16 bytes @ sr
+        f = np.frombuffer(raw, np.int16).astype(np.float32) / 32768.0
+        out = resample(f, src=sr, dst=24000)           # 统一到前端/OpenAI 的 24k
+        yield (np.clip(out, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
 
 
 def realtime_connect():
