@@ -1,185 +1,131 @@
-# VoiceMem
+<p align="center">
+  <img src="assets/Voicemem_logo.png" alt="VoiceMem Logo" width="100%">
+</p>
 
+---
 
-test test
-VoiceMem is a memory framework for conversational agents built around a
-**left-brain / right-brain split**:
+<p align="center">
+  <a href="#quick-start">Quick Start 🚀</a> /
+  <a href="#architecture">Architecture 🧠</a> /
+  <a href="QUICKSTART.md">语音 Demo 🎙️</a>
+</p>
 
-- **Left brain** (`voicemem/leftbrain/`) — structured factual memory: entity
-  extraction, a cognitive graph over "slots" (topics, unified under one
-  7-value taxonomy — see `cognitive_graph/slot_v2.py`), retrieval by
-  slot-classification + entity-narrowing. Raw facts are stored via
-  [mem0](https://github.com/mem0ai/mem0) with a local/embedded Qdrant vector
-  store (`leftbrain/mem0_backend_store.py`); the cognitive graph itself
-  references mem0's memory ids rather than duplicating storage.
-- **Right brain** (`voicemem/rightbrain/`, `voicemem/utils/audio/emotion/`) — episodic /
-  emotional memory: per-turn valence-arousal tracking, anomaly detection, and
-  memory attribution for emotionally significant turns.
-- **Fusion** (`voicemem/fusion/`) — orchestrates both hemispheres into a
-  single `Search()` / `Ingest()` API and builds the final prompt context.
-  (The user profile / persona lives in the right brain as a `source="profile"`
-  hit, retrieved by query like any other slot — no separate pre-stimulus layer.)
+<p align="center">
+  <a href="https://huggingface.co/LangJiaqi77/Voicemem-Qwen3_6-35B-A3B-QLoRA-v2"><img src="https://img.shields.io/badge/HuggingFace-Model-FFD21E?logo=huggingface&logoColor=black" alt="HF Model"></a>&nbsp;<a href="https://lang-jiaqi.github.io/Voicemem_open/"><img src="https://img.shields.io/badge/Project-Page-blue" alt="Project Page"></a>&nbsp;<img src="https://img.shields.io/badge/License-Apache%202.0-green" alt="License">&nbsp;<a href="https://github.com/lang-jiaqi/Voicemem_open"><img src="https://img.shields.io/github/stars/lang-jiaqi/Voicemem_open?style=social" alt="GitHub stars"></a>&nbsp;<a href="#"><img src="https://img.shields.io/badge/WeChat-Join%20Group-07C160?logo=wechat&logoColor=white" alt="WeChat"></a>&nbsp;<a href="#"><img src="https://img.shields.io/badge/X-VoiceMem-black?logo=x&logoColor=white" alt="X"></a>
+</p>
 
-## Beyond text: an audio-native perception layer
+---
 
-Unlike a text-only memory system, VoiceMem has several components that
-operate directly on raw audio rather than on transcripts:
+我们带来 **VoiceMem**，为语音模型增加最后一个组件：灵魂，让它真正越来越懂你。VoiceMem 建立在
+「流式双脑」架构之上，提供精准、有情感、懂人格、低延迟且最便宜的记忆服务。快速理解 VoiceMem：
 
-| Component | What it does | Input |
-|---|---|---|
-| `emotion/vad_audio.py` | Prosodic valence/arousal estimation straight from the waveform (RMS, zero-crossing rate, dynamic range) | raw audio, no LLM |
-| `environment_detector_ast.py` (+ optional `environment_detector_clap.py`) | Audio Spectrogram Transformer tagging — background scene, music/humming, abnormal sounds (glass breaking, alarms, screaming); optional CLAP refinement for the background-scene description | raw audio |
-| `speaker_encoder.py` + `voiceprint_store.py` | 3D-Speaker ERes2Net speaker embeddings, adaptive multi-centroid voiceprint profiles for speaker ID | raw audio |
-| `emotion/attribution_qwen_omni.py` | Feeds audio directly into Qwen2.5-Omni (native audio input, not ASR-then-text) for emotion attribution | raw audio |
+- **左脑：** 直接管理信息，在 top-3 限制下维持 Mem0 的满载性能。
+- **右脑：** 用长短期情绪归因管理「情商」，含交叉节点、与左脑信息联合维护。
+- **低延迟：** 通过压缩信息、分层存储、流式查询（0–500ms 投机预取），几乎不增加延迟。
+- **简单实用：** 单轮查询约 300 token；架构全部解耦，全部组件（含底层记忆引擎）都可更换。
 
-What VoiceMem does **not** do itself: speech-to-text transcription and
-per-utterance `emotion2vec` tagging are expected to happen upstream (see
-`voice_input.py`) — `Ingest()` takes already-transcribed `text`, and
-optionally `audio_path` for the perception layers above. There is no bundled
-ASR or voice-output pipeline in this package; see
-[`examples/ingest_audio.py`](examples/ingest_audio.py) for a self-contained
-way to exercise the audio-native layers on a `.wav` file.
+---
 
-## Install
+## Overview
 
+* **[Quick Start](#quick-start)**
+* **[Architecture](#architecture)**
+* **[三种输入接口](#interfaces)**
+* **[Demo](#demo)**
+* **[Released Model](#released-model)**
+* **[Acknowledgements](#acknowledgements)**
+* **[License](#license)**
+
+## Quick Start
+
+**安装**
 ```bash
-pip install -e .                                       # core: leftbrain/rightbrain/fusion, text only
-pip install -e ".[audio,environment,omni,voiceprint]"   # + scene/speaker/emotion from raw audio
+git clone https://github.com/lang-jiaqi/Voicemem_open.git
+cd Voicemem_open
+
+pip install -e ".[demo,audio,environment,voiceprint]"     # 记忆核心 + 音频感知 + 流式
+bash scripts/download_models.sh models                    # sherpa ASR/VAD/声纹 + 本地 E5（HuggingFace）
+export OPENAI_API_KEY=sk-...
 ```
 
-Set `OPENAI_API_KEY` (optionally `OPENAI_BASE_URL` / `OPENAI_MODEL` /
-`OPENAI_EMBEDDING_MODEL`) — the left-brain extraction/classification and
-retrieval ranking call the OpenAI-compatible chat/embeddings API.
+> 只想纯文本试用、不下语音模型？`pip install -e ".[demo]"` 即可（打字通道能跑通记忆 + 回复）。
 
-## API structure: `VoiceMem` = left_brain / right_brain / utils
-
-`voicemem/core.py` is a small, readable top layer; the heavy implementation
-lives in `voicemem/engine.py` and is only delegated to.
-
-- **`VoiceMem`** — top entry. Takes `api_key`, `mode`, and per-util overrides.
-- **`.left_brain` / `.right_brain`** — each has `search()` / `store()`.
-- **`.utils`** — the swappable capabilities: entity / schema / ASR / emotion /
-  voiceprint / embedding / **memory_engine** (mem0 by default; pass another to
-  use e.g. zep). Each defaults to a builtin; override by passing a function.
-- **`mode`** ∈ `left_brain_single` / `text_mode` / `multi_modal` — decides which
-  utils load. Utils load lazily, only when needed.
-
-## Quick start
-
+**三行上手（文本）**
 ```python
 from voicemem import VoiceMem
 
-vm = VoiceMem(api_key="sk-...", mode="text_mode")
-vm.ingest("Had ramen with Alex near the office at noon.")
-
-for hit in vm.left_brain.search("what did I eat for lunch"):
-    print(hit)                        # left-brain facts
-
-vm.test()                             # startup self-check: 4-tier speed table
+vm = VoiceMem(mode="text_mode")               # 自动读环境变量 OPENAI_API_KEY（见上面 export）
+vm.ingest("中午和 Alex 吃了拉面")
+vm.search("我中午吃了什么？")                 # 左右脑一起检索
+vm.left_brain.search("我中午吃了什么？")       # 只要左脑事实、更快
 ```
 
-Swap a util by passing a function (default is a builtin):
-
-```python
-vm = VoiceMem(mode="text_mode",
-              embedding=lambda: MyEmbedder(),
-              memory_engine=lambda: MyZepStore())   # replace mem0
-```
-
-Memory is stored under `memory/leftbrain/` by default (mem0/Qdrant for raw
-facts, SQLite for the cognitive graph and right-brain data); override the
-root with the `VOICEMEM_MEMORY_ROOT` environment variable.
-
-## Components
-
-Every engine component is also exported lazily from the package, so
-`from voicemem import SpeakerEncoder` etc. works — the audio-native ones load
-lazily, so plain `import voicemem` never pulls in torch/sherpa and the
-text-only core install stays light. See `voicemem/__init__.py`.
-
-`Ingest()` is a three-step pipeline: **preprocess → assemble → write**. The
-first step is a standalone, public **streaming-preprocessing** seam that runs
-all acoustic perception (scene / speaker / emotion …) on one turn of audio and
-returns an `AudioPerception` — via the front-desk `voicemem.preprocess(...)`
-gives you the signals without writing a memory:
-
-```python
-sig = voicemem.preprocess("...", audio_path="turn.wav")   # no write
-print(sig["scene"], sig["speaker_id"], sig["emotion"])
-```
-
-## Released model adapter
-
-Our QLoRA adapter, trained for the VoiceMem memory workflow, is available on
-[Hugging Face: `LangJiaqi77/Voicemem-Qwen3_6-35B-A3B-QLoRA-v2`](https://huggingface.co/LangJiaqi77/Voicemem-Qwen3_6-35B-A3B-QLoRA-v2).
-It is an adapter-only release for
-[`Qwen/Qwen3.6-35B-A3B`](https://huggingface.co/Qwen/Qwen3.6-35B-A3B); release
-details, loading code, checksums, and evaluation notes are in
-[`models/voicemem-qwen3.6-35b-a3b-qlora-v2/`](models/voicemem-qwen3.6-35b-a3b-qlora-v2/).
-
-## Audio-native features
-
-```python
-vm.Ingest("...", audio_path="turn.wav")   # also runs scene/speaker/VAD detection
-vm.IngestEnv(audio_path="turn.wav")       # background-scene detection only
-```
-
-`speaker_encoder.py` extracts a 192-dim 3D-Speaker ERes2Net embedding for each
-utterance via a worker subprocess (`voicemem/utils/audio/voiceprint/campplus_worker.py`,
-kept separate because it needs `sherpa-onnx`). The worker reads the ONNX
-weights from `models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx`
-by default — run `bash scripts/download_models.sh models` once to
-fetch it (this works whether or not you use `service/`), or point
-`VOICEMEM_SPEAKER_MODEL` at a model file elsewhere. By default the worker
-runs in the same interpreter (`sys.executable`); to isolate it into a
-dedicated environment, set `VOICEMEM_AUDIOMEM_PYTHON=/path/to/other/python`.
-
-Environment classification uses the Audio Spectrogram Transformer (AST) by
-default. Install the optional dependencies with `pip install -e ".[environment]"`;
-the model downloads on first use, or set `VOICEMEM_ENVIRONMENT_MODEL_DIR` to a
-pre-downloaded local model directory.
-
-For a more accurate background-sound *description* (4-second-segmented CLAP,
-tested at ~60% accuracy vs. AST's raw score), install `pip install -e ".[clap]"`
-and set `VOICEMEM_CLAP_CHECKPOINT=/path/to/630k-audioset-best.pt` — it takes
-over the description memory write automatically once configured. AST still
-supplies the immediate hint and still covers music/abnormal-sound detection
-and the place-clustering embedding. Set `VOICEMEM_ENVIRONMENT_MEMORY_BACKEND=ast`
-to opt back out.
-
-For multimodal emotion attribution with Qwen2.5-Omni, see
-[`examples/load_qwen_omni_attributor.py`](examples/load_qwen_omni_attributor.py)
-— `QwenOmniEmotionAttributor` takes an already-loaded processor/model/tokenizer
-via dependency injection; the example shows how to load them.
-
-Try the perception layers directly on a `.wav` file:
-
+**语音 Demo（脑图 + 0–500ms 投机预取）**
 ```bash
-python examples/ingest_audio.py path/to/turn.wav
-python examples/ingest_audio.py path/to/turn.wav --text "..." --ingest   # + full memory pipeline
+cd web && DEMO_MODE=llm_tts python run.py     # http://localhost:8787
+# 想要更自然的原生语音： DEMO_MODE=realtime python run.py  （需 Realtime API 权限）
+```
+详见 [QUICKSTART.md](QUICKSTART.md)。
+
+## Architecture
+
+VoiceMem 是**一层薄门面 + 三个自包含组件**（组合式，参考 [mem0](https://github.com/mem0ai/mem0)）——
+打开 `core.py` 就一眼看懂整个系统，重逻辑都藏在组件里、依赖显式注入、可整块替换：
+
+```
+core.py            VoiceMem 门面（对外 ~70 行）
+  ├─ leftbrain/    LeftBrain      事实记忆：实体 + 认知图（slot 分类/检索），底层 mem0 向量库
+  ├─ rightbrain/   RightBrain     情绪记忆：valence-arousal、长短期情绪归因、人格画像、交叉节点
+  ├─ utils/audio/  AudioPerceiver 音频原生感知：声纹 / 声学场景 / 情绪 / 音乐（直接吃波形）
+  └─ stream.py     VoiceStream    流式输入：本地 ASR + VAD + 0–500ms 投机预取
+orchestrator.py    编排实现（把三组件串成 Search/Ingest pipeline）
 ```
 
-## Demos
+- **组件可换**：`embedding` / `schema`(分类器) / `memory_engine`(默认 mem0) 等每个能力都有内置默认，
+  传一个函数就换成自己的（本地模型、别的向量库…）。
+- **读写分离**：抽取事实、更新摘要、刷新描述等「慢而智能」的 LLM 活儿都在写入侧；读（检索）路径
+  0 次 LLM、走本地向量，实测 Search 本体 ~10ms。
 
-**[`web/`](web/)** — the single, minimal demo: `run.py` (core conversation logic)
-+ `utils.py` (pipeline) + one brain-graph `index.html` (rendering only). Talk to
-it, watch the left/right-brain graph grow live. It shows the **EOU-anticipatory
-0–500ms pipeline**: local streaming ASR + Silero VAD drive a *speculative* memory
-prefetch that runs on a LOCAL E5 embedder + a LOCAL slot classifier (injected via
-`VoiceMem(embedding=…, schema=LocalQueryClassifier(…))`) — so nothing in the hot
-path hits the network, and the LLM `Classify` is skipped. By the time VAD confirms
-end-of-utterance, the memory is already fetched off the critical path; the two
-dead-simple control flows (`voicemem_llm_tts`, `voicemem_realtime`) just *consume*
-it and reply. Barge-in (a mid-utterance pause then resume) cancels the speculation
-instead of firing a turn. See [QUICKSTART.md](QUICKSTART.md).
+## 三种输入接口 <a id="interfaces"></a>
 
-**[`openai_voice_demo/`](openai_voice_demo/)** — the full reference demo:
-OpenAI-based (GPT-4o pipeline or Realtime API) voice loop with a browser
-frontend, an Electron desktop floating-orb, and `.app` packaging. Heavier; keep
-it around when you want the battle-tested pipeline/realtime backends. On launch
-it runs the per-component **startup self-check** (`voicemem/startup_check.py`);
-set `VOICEMEM_SKIP_STARTUP_CHECK=1` to skip.
+文本 / wav / 流式，三者在核心并列：
+
+```python
+# ① 文本
+vm.ingest("中午吃了拉面");   vm.search("我中午吃了什么")
+
+# ② wav（+ 声学感知：声纹/场景/情绪）
+vm.ingest(text, audio="turn.wav")
+sig = vm.preprocess(text, audio="turn.wav")     # 只拿声学信号、不写记忆
+
+# ③ 流式（喂音频块 → 说完得到一轮记忆结果）
+stream = vm.stream(on_partial=cb)
+turn = await stream.feed(pcm_chunk)             # None（还在说）或 Turn(text, result=SearchResult)
+turn = await stream.feed_text("我在哪工作")       # 打字轮
+turn.text / turn.result / turn.memory_context
+```
+
+## Demo
+
+**[`web/`](web/)** —— 单一极简 demo：`run.py`（对话核心）+ `utils.py`（管道）+ 脑图 `index.html`。
+本地 ASR + VAD 边听边算，VAD 确认说完时记忆早已在关键路径外投机预取好，两条回复控制流
+（`llm_tts` = GPT 流→TTS 流 / `realtime` = OpenAI Realtime 原生语音）拿去回复。WebSocket 协议见
+[docs/PROTOCOL.md](docs/PROTOCOL.md)。
+
+## Released Model
+
+VoiceMem 记忆工作流微调的 QLoRA adapter：
+[**LangJiaqi77/Voicemem-Qwen3_6-35B-A3B-QLoRA-v2**](https://huggingface.co/LangJiaqi77/Voicemem-Qwen3_6-35B-A3B-QLoRA-v2)
+（adapter-only，基座 [`Qwen/Qwen3.6-35B-A3B`](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)；
+加载代码、校验、评测见 [`models/voicemem-qwen3.6-35b-a3b-qlora-v2/`](models/voicemem-qwen3.6-35b-a3b-qlora-v2/)）。
+
+## Acknowledgements
+
+衷心感谢这些出色的开源项目：[mem0](https://github.com/mem0ai/mem0)（底层向量记忆引擎）、
+[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)（流式 ASR / Silero VAD / 3D-Speaker 声纹）、
+[intfloat/multilingual-e5](https://huggingface.co/intfloat/multilingual-e5-small)（本地 embedding 与 slot 分类），
+以及 OpenAI（chat / TTS / Realtime）。
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+本项目以 **Apache License 2.0** 开源 — 见 [LICENSE](LICENSE)。用 VoiceMem 尽情构建 🎉

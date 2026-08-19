@@ -15,35 +15,17 @@ from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
+# 本地 E5 embedder（memory embedding + slot 分类共享一份模型）已提进核心，见
+# voicemem/leftbrain/local_e5_embedder.py；这里 re-export 保持 `utils.LocalE5Embedder`
+# / `utils.shared_e5()` 的既有调用点不变（run.py 用它注入 VoiceMem(embedding=...)）。
+from voicemem.leftbrain.local_e5_embedder import LocalE5Embedder, shared_e5  # noqa: F401
+
 HERE = Path(__file__).resolve().parent
 CHAT_MODEL = os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o")
 TTS_MODEL = os.environ.get("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
+TTS_BACKEND = os.environ.get("TTS_BACKEND", "openai")   # openai(api) | local(离线小模型)
 RT_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime")
 client = AsyncOpenAI()
-
-
-# ── 本地 E5：memory embedding + slot 分类共享同一个模型实例（省一份内存）──────────
-_E5_NAME = "intfloat/multilingual-e5-small"
-
-
-@lru_cache(maxsize=1)
-def shared_e5():
-    from sentence_transformers import SentenceTransformer
-    return SentenceTransformer(_E5_NAME)
-
-
-class LocalE5Embedder:
-    """注入 VoiceMem(embedding=...)：Rank/存取的向量走本地 E5，0-500ms 预算内不碰网络。"""
-    @property
-    def model_name(self): return f"{_E5_NAME} (local)"
-    @property
-    def dimensions(self): return shared_e5().get_sentence_embedding_dimension()
-    def embed_texts(self, texts):
-        if not texts: return []
-        return np.asarray(shared_e5().encode([f"passage: {t}" for t in texts],
-                                             normalize_embeddings=True)).tolist()
-    def embed_query_text(self, text):
-        return np.asarray(shared_e5().encode([f"query: {text}"], normalize_embeddings=True)[0]).tolist()
 
 
 # ── 音频小工具 ────────────────────────────────────────────────────────────────
@@ -63,10 +45,21 @@ def make_vad():
     return _V()
 
 
+# ── 回复模型也在一处配：统一 config 的 reply 段（run.py 从 CONFIG["reply"] 传入）──
+# 不传就回落到模块级 env 默认（CHAT_MODEL / TTS_MODEL / TTS_BACKEND / RT_MODEL），
+# 现有行为完全不变。reply 结构：{"llm": {"config": {"model": ...}},
+# "tts": {"provider": "openai|local", "config": {"model": ...}},
+# "realtime": {"config": {"model": ...}}}，每段可省。
+def _reply_seg(reply, name):
+    seg = (reply or {}).get(name) or {}
+    return seg.get("provider"), (seg.get("config") or {})
+
+
 # ── LLM / TTS / Realtime 流 ───────────────────────────────────────────────────
-async def llm_stream(text, ctx):
+async def llm_stream(text, ctx, reply=None):
+    _, cfg = _reply_seg(reply, "llm")
     stream = await client.chat.completions.create(
-        model=CHAT_MODEL, stream=True,
+        model=cfg.get("model") or CHAT_MODEL, stream=True,
         messages=[{"role": "system", "content": ctx or "你是语音助手，简短自然地回答。"},
                   {"role": "user", "content": text}])
     async for chunk in stream:
@@ -75,17 +68,49 @@ async def llm_stream(text, ctx):
             yield d
 
 
-async def tts_stream(text):
+async def tts_stream(text, reply=None):
+    """可切换 TTS：默认走 OpenAI api；reply.tts.provider==local（或 TTS_BACKEND=local）
+    走离线本地小模型。两条都吐 24kHz PCM16 流，前端一视同仁播放。"""
+    provider, cfg = _reply_seg(reply, "tts")
+    backend_name = provider or TTS_BACKEND          # 对齐现有 TTS_BACKEND 语义
+    backend = _local_tts_stream if backend_name == "local" else _openai_tts_stream
+    async for chunk in backend(text, cfg.get("model")):
+        yield chunk
+
+
+async def _openai_tts_stream(text, model=None):
+    """在线 api：OpenAI TTS（gpt-4o-mini-tts），response_format=pcm 就是 24k PCM16。"""
     async with client.audio.speech.with_streaming_response.create(
-            model=TTS_MODEL, voice="alloy", input=text, response_format="pcm") as resp:
+            model=model or TTS_MODEL, voice="alloy", input=text, response_format="pcm") as resp:
         async for chunk in resp.iter_bytes():
             yield chunk
 
 
-def realtime_connect():
+@lru_cache(maxsize=1)
+def _piper_voice():
+    """离线小模型：默认 piper（纯离线 onnx，中英皆可）。装：pip install piper-tts；
+    VOICEMEM_TTS_MODEL 指向 voice 的 .onnx。想换 kokoro / edge-tts 等，只改这个函数
+    和下面 _local_tts_stream 的取样即可。piper api 随版本，对照其文档。"""
+    from piper import PiperVoice
+    return PiperVoice.load(os.environ["VOICEMEM_TTS_MODEL"])
+
+
+async def _local_tts_stream(text, model=None):
+    """离线本地 TTS：合成 → 重采样到 24k → 分块 yield，接口和在线版完全一致。
+    （离线 voice 由 VOICEMEM_TTS_MODEL 指定；model 形参仅为和在线版对齐签名。）"""
+    v = _piper_voice()
+    sr = getattr(getattr(v, "config", None), "sample_rate", 22050)
+    for raw in v.synthesize_stream_raw(text):          # 同步生成器，int16 bytes @ sr
+        f = np.frombuffer(raw, np.int16).astype(np.float32) / 32768.0
+        out = resample(f, src=sr, dst=24000)           # 统一到前端/OpenAI 的 24k
+        yield (np.clip(out, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+
+
+def realtime_connect(reply=None):
     """方案 A：整段麦克风音频平行喂给它出原生语音。事件名随 SDK 版本可能微调
     （对照 openai_voice_demo/backend/providers/realtime.py）。"""
-    return client.realtime.connect(model=RT_MODEL)
+    _, cfg = _reply_seg(reply, "realtime")
+    return client.realtime.connect(model=cfg.get("model") or RT_MODEL)
 
 
 # ── SearchResult → 脑图 html 认识的 memory_hits 负载 ──────────────────────────

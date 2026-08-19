@@ -31,16 +31,37 @@ os.environ.setdefault("VOICEMEM_MODELS_DIR", str(_ROOT / "models"))
 import utils                                         # noqa: E402  同目录管道层
 from voicemem import VoiceMem                        # noqa: E402
 from voicemem.memory_api import build_memory_context  # noqa: E402
-from voicemem.leftbrain.cognitive_graph.local_query_classifier import LocalQueryClassifier  # noqa: E402
 
 MODE = os.environ.get("DEMO_MODE", "llm_tts")        # llm_tts | realtime
 SPEC_MIN_CHARS, GAMBLE_S, CONFIRM_S = 6, 0.20, 0.50  # partial 起投机 / 赌说完 / VAD 确认结束
 
-# embedding + 分类器都注入本地、共享一份 E5 → 整条 search 0 LLM、0 网络（实测 Search 本体 ~10ms）
-vm = VoiceMem(mode="multi_modal",
-              memory_root=os.environ.get("VOICEMEM_MEMORY_ROOT"),
-              embedding=lambda: utils.LocalE5Embedder(),
-              schema=lambda: LocalQueryClassifier(model=utils.shared_e5()))
+# ══════════════════ 统一配置入口：一个 dict 配齐所有本地/api 模型 ══════════════════
+# 打开这个 dict 就知道每个模型走本地还是 api。记忆侧（embedding/slots）走本地 E5
+# → 整条 search 0 LLM、0 网络（实测 Search 本体 ~10ms）；reply 段（回复用的
+# llm/tts/realtime）也在这一处配，省得分散在各处 env。缺省项走内置默认。
+# 想外挂一份自定义 config：设 VOICEMEM_CONFIG 指向一个 .json 文件即可覆盖。
+CONFIG = {
+    "mode": "multi_modal",
+    "memory_root": os.environ.get("VOICEMEM_MEMORY_ROOT"),
+    "embedding": {"provider": "local"},              # 记忆向量走本地 E5（0 网络）
+    "slots":     {"provider": "local"},              # slot 分类走本地 E5（0 LLM）
+    # reply：回复用模型（核心不管，web 读）。默认全走 OpenAI api。
+    "reply": {
+        "llm":      {"provider": "openai", "config": {"model": utils.CHAT_MODEL}},
+        "tts":      {"provider": utils.TTS_BACKEND, "config": {"model": utils.TTS_MODEL}},
+        "realtime": {"provider": "openai", "config": {"model": utils.RT_MODEL}},
+    },
+}
+
+# VOICEMEM_CONFIG 指向的 json 文件整体覆盖上面的 CONFIG（傻瓜清晰：一个文件配齐）。
+_cfg_path = os.environ.get("VOICEMEM_CONFIG")
+if _cfg_path:
+    CONFIG = json.loads(Path(_cfg_path).read_text(encoding="utf-8"))
+
+REPLY = CONFIG.get("reply")                           # 传给 utils 的回复函数
+
+# 声明式构造：from_config 是现有注入机制之上的糖（VoiceMem(embedding=fn, schema=fn,…)）。
+vm = VoiceMem.from_config(CONFIG)
 
 
 @dataclass
@@ -60,11 +81,11 @@ async def voicemem_llm_tts(pending, send, send_audio):
     await send({"type": "memory_hits", **utils.hits_payload(pending.result)})
     await send({"type": "answer_start"})
     reply = ""
-    async for d in utils.llm_stream(pending.text, pending.memory_context):
+    async for d in utils.llm_stream(pending.text, pending.memory_context, REPLY):
         reply += d
         await send({"type": "answer_delta", "text": d})
     await send({"type": "answer_done"})
-    async for pcm in utils.tts_stream(reply):
+    async for pcm in utils.tts_stream(reply, REPLY):
         await send_audio(pcm)
     vm.ingest(pending.text)
 
@@ -165,7 +186,7 @@ async def llm_tts_session(sock):
 async def realtime_session(sock):
     """方案 A：整段麦克风音频平行喂给 OpenAI Realtime；本地 ASR+VAD 只负责投机记忆 +
     用 500ms 判回合（关掉 OpenAI 自带 server_vad）。"""
-    async with utils.realtime_connect() as conn:
+    async with utils.realtime_connect(REPLY) as conn:
         await conn.session.update(session={"type": "realtime", "turn_detection": None})
 
         async def on_frame(raw):
