@@ -39,5 +39,4 @@ DEMO_MODE=llm_tts python run.py             # http://localhost:8787
 - 点「开始对话」秒退回待机 / `code=1006` → demo 进程没在跑，确认它打印了 `-> http://localhost:8787/`。
 - 「请用 http://localhost:8000 打开」这类提示 → 别双击 html 文件，走 http://localhost:8787。
 - 用 Chrome / Edge 最稳。
-- 还想要桌面浮球 / pipeline·realtime 的完整后端，见 `openai_voice_demo/`。
 ```

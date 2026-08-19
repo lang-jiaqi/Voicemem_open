@@ -1,6 +1,0 @@
-# Core memory framework (text-only: leftbrain/rightbrain/fusion/persona).
-# For the audio-native layers, install with extras instead, e.g.:
-#   pip install -e ".[audio,environment,omni,voiceprint]"      # scene/speaker/emotion from raw audio
-#   pip install -e ".[audio,environment,omni,voiceprint,service]"    # + service/'s WebSocket backend
-numpy
-openai
