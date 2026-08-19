@@ -5,7 +5,6 @@
 ---
 
 <p align="center">
-  <a href="https://huggingface.co/LangJiaqi77/Voicemem-Qwen3_6-35B-A3B-QLoRA-v2">Model (QLoRA adapter) 🤗</a> /
   <a href="#quick-start">Quick Start 🚀</a> /
   <a href="#architecture">Architecture 🧠</a> /
   <a href="QUICKSTART.md">语音 Demo 🎙️</a>
