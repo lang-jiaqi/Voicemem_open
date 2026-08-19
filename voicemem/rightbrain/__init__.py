@@ -6,6 +6,7 @@ heartnote + response_experience 的动态检索系统。
 """
 from .anchor_router import AnchorRouter
 from .attribution_manager import AttributionManager
+from .brain import RightBrain, RightBrainHit
 from .experience_repository import ExperienceRepository
 from .graph_store import RBEntity, RBSlot, RightBrainGraphStore
 from .store import RightBrainStore
@@ -20,6 +21,8 @@ from .types import (
 __all__ = [
     "AnchorRouter",
     "AttributionManager",
+    "RightBrain",
+    "RightBrainHit",
     "ExperienceRepository",
     "RightBrainGraphStore",
     "RBSlot",

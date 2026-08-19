@@ -30,7 +30,7 @@ _LAZY: dict[str, str] = {
     "LeftBrain":                "voicemem.core:LeftBrain",
     "RightBrain":               "voicemem.core:RightBrain",
     "SearchResult":             "voicemem.engine:SearchResult",
-    "RightBrainHit":            "voicemem.engine:RightBrainHit",
+    "RightBrainHit":            "voicemem.rightbrain.brain:RightBrainHit",
     "AudioPerception":          "voicemem.utils.audio.perceiver:AudioPerception",
 
     # ── 语音接入适配层（上游语音模块结构化输出 → 左脑注入）──
@@ -127,9 +127,8 @@ def __dir__() -> list[str]:
 
 # 让静态类型检查器 / IDE 也能看到这些名字（运行期不执行，不触发重依赖）。
 if TYPE_CHECKING:  # pragma: no cover
-    from voicemem.engine import (
-        RightBrainHit, SearchResult, VoiceMem,
-    )
+    from voicemem.engine import SearchResult, VoiceMem
+    from voicemem.rightbrain.brain import RightBrainHit
     from voicemem.utils.audio.perceiver import AudioPerception
     from voicemem.utils.audio.emotion import (
         EmotionLayer, EmotionLayerConfig, EmotionLayerResult,
