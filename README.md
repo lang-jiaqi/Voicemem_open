@@ -54,7 +54,7 @@ export OPENAI_API_KEY=sk-...
 ```python
 from voicemem import VoiceMem
 
-vm = VoiceMem(api_key="sk-...", mode="text_mode")
+vm = VoiceMem(mode="text_mode")               # 自动读环境变量 OPENAI_API_KEY（见上面 export）
 vm.ingest("中午和 Alex 吃了拉面")
 vm.search("我中午吃了什么？")                 # 左右脑一起检索
 vm.left_brain.search("我中午吃了什么？")       # 只要左脑事实、更快
