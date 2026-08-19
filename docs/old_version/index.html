@@ -16,8 +16,6 @@
     --pink:#ff5fa2;
     --amber:#ff9a3c;
     --leaf:#4ade80;
-    --brass:#e0a94a;
-    --disc:170px;
     --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
     --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
   }
@@ -29,101 +27,65 @@
     overflow:hidden;
     -webkit-font-smoothing:antialiased;
   }
-  #shell{
-    position:fixed;inset:0;display:flex;flex-direction:column;
-    padding:clamp(28px,5vh,60px) clamp(14px,3vw,40px) calc(var(--disc) - 4px);
-  }
+  #shell{position:fixed;inset:0;display:flex;flex-direction:column;padding:18px clamp(14px,3vw,40px) 14px}
 
   /* ---------- masthead ---------- */
-  header{display:flex;align-items:center;gap:clamp(14px,2vw,26px);flex:0 0 auto;position:relative;z-index:4}
+  header{display:flex;align-items:center;gap:18px;flex:0 0 auto}
   header .rule{flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--line) 22%,var(--line) 78%,transparent)}
   header h1{
-    margin:0;font-weight:400;font-size:clamp(25px,3.3vw,44px);
-    letter-spacing:.40em;text-indent:.40em;white-space:nowrap;
-    color:#fff;text-shadow:0 0 34px rgba(180,205,255,.42);
+    margin:0;font-weight:400;font-size:clamp(19px,2.3vw,29px);
+    letter-spacing:.42em;text-indent:.42em;white-space:nowrap;
+    color:#fff;text-shadow:0 0 26px rgba(180,205,255,.35);
   }
 
   /* ---------- stage ---------- */
   main{flex:1 1 auto;position:relative;display:flex;align-items:center;justify-content:center;min-height:0}
   #stage{position:relative;width:100%;height:100%}
   #brain{
-    position:absolute;left:0;top:0;width:100%;height:100%;
-    object-fit:fill;mix-blend-mode:screen;
+    position:absolute;inset:0;width:100%;height:100%;
+    object-fit:contain;mix-blend-mode:screen;
     filter:brightness(.92) contrast(1.06);
     opacity:0;transition:opacity 1.4s ease .1s;
     pointer-events:none;user-select:none;
   }
   #brain.in{opacity:1}
-  /* one fixed, viewport-sized canvas draws the graph, the beams and the platter */
-  #fx{position:fixed;inset:0;width:100%;height:100%;display:block;z-index:2;pointer-events:none}
-  /* one stacking context: cortex 0 < canvas 2 < legends 3 < chrome 4 < bar 6 < card 7 */
+  #fx{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
 
   /* ---------- hemisphere legends ---------- */
   .side{
     position:absolute;top:50%;transform:translateY(-50%);
-    display:flex;flex-direction:column;gap:clamp(22px,3.3vh,36px);z-index:3;
+    display:flex;flex-direction:column;gap:30px;z-index:3;
     pointer-events:auto;
   }
-  .side.l{left:clamp(14px,7vw,152px);align-items:flex-start}
-  .side.r{right:clamp(14px,7vw,152px);align-items:flex-end}
+  .side.l{left:clamp(6px,2vw,34px);align-items:flex-start}
+  .side.r{right:clamp(6px,2vw,34px);align-items:flex-end}
   .side h2{
-    margin:0 0 6px;font-family:var(--serif);font-style:italic;font-weight:400;
-    font-size:clamp(15px,1.65vw,22px);letter-spacing:.01em;color:#e8ecf5;white-space:nowrap;
+    margin:0 0 4px;font-family:var(--serif);font-style:italic;font-weight:400;
+    font-size:clamp(13px,1.35vw,18px);letter-spacing:.01em;color:#e8ecf5;white-space:nowrap;
   }
   .side.l h2 em{font-style:italic;color:#7fb2e8}
   .side.r h2 em{font-style:italic;color:#e879a8}
   .key{
-    display:flex;align-items:center;gap:11px;cursor:default;
-    font-family:var(--serif);font-style:italic;font-size:clamp(13.5px,1.15vw,16.5px);
-    color:var(--dim);transition:color .35s ease,opacity .35s ease;padding:4px 0;
+    display:flex;align-items:center;gap:9px;cursor:default;
+    font-family:var(--serif);font-style:italic;font-size:13px;color:var(--dim);
+    transition:color .35s ease,opacity .35s ease;padding:3px 0;
   }
   .side.r .key{flex-direction:row-reverse}
   .key:hover{color:#fff}
-  .key .g{width:13px;height:13px;flex:0 0 13px;opacity:.85;transition:transform .35s cubic-bezier(.2,.8,.2,1)}
+  .key .g{width:11px;height:11px;flex:0 0 11px;opacity:.85;transition:transform .35s cubic-bezier(.2,.8,.2,1)}
   .key:hover .g{transform:scale(1.35)}
   .key .g svg{display:block;overflow:visible}
 
-  /* ---------- frosted action bar ---------- */
-  .glass{
-    position:absolute;left:50%;bottom:1%;transform:translateX(-50%);
-    display:flex;z-index:6;border-radius:999px;overflow:hidden;
-    border:1px solid rgba(255,255,255,.18);
-    background:rgba(11,15,25,.50);
-    backdrop-filter:blur(26px) saturate(150%) brightness(.5);
-    -webkit-backdrop-filter:blur(26px) saturate(150%) brightness(.5);
-    box-shadow:
-      0 20px 54px -20px rgba(0,0,0,.95),
-      inset 0 1px 0 rgba(255,255,255,.18),
-      inset 0 -1px 0 rgba(255,255,255,.05),
-      0 0 46px -16px rgba(120,170,255,.4);
-  }
-  .glass > *{
-    appearance:none;-webkit-appearance:none;background:none;border:0;
-    border-right:1px solid rgba(255,255,255,.11);
-    font-family:var(--mono);font-size:clamp(10.5px,.92vw,13px);
-    letter-spacing:.17em;text-transform:uppercase;
-    color:#cdd5e4;text-decoration:none;cursor:pointer;
-    padding:12px clamp(15px,1.9vw,30px);
-    display:flex;align-items:center;gap:9px;white-space:nowrap;
-    transition:background .3s ease,color .3s ease;
-  }
-  .glass > *:last-child{border-right:0}
-  .glass > *:hover{background:rgba(255,255,255,.12);color:#fff}
-  .glass .d{width:5px;height:5px;border-radius:50%;background:currentColor;opacity:.6;box-shadow:0 0 9px currentColor}
-  .glass .d.b{background:var(--blue);box-shadow:0 0 9px var(--blue)}
-  .glass .d.p{background:var(--pink);box-shadow:0 0 9px var(--pink)}
-  .glass .d.g{background:var(--leaf);box-shadow:0 0 9px var(--leaf)}
-
   /* ---------- memory card ---------- */
   #card{
-    position:fixed;left:0;top:0;width:214px;z-index:7;
+    position:absolute;left:0;top:0;width:214px;z-index:5;
     border:1px solid rgba(255,255,255,.82);
     background:rgba(4,5,8,.80);
     backdrop-filter:blur(9px) saturate(120%);
     -webkit-backdrop-filter:blur(9px) saturate(120%);
     padding:11px 12px 10px;
-    opacity:0;transform:translate3d(-999px,-999px,0);
-    transition:opacity .22s ease;
+    opacity:0;transform:translate3d(-999px,-999px,0) scale(.97);
+    transition:opacity .22s ease,transform .22s cubic-bezier(.2,.8,.2,1);
     will-change:transform,opacity;pointer-events:none;
     box-shadow:0 0 0 1px rgba(0,0,0,.9),0 18px 50px -18px rgba(0,0,0,1);
   }
@@ -147,7 +109,7 @@
   }
 
   /* ---------- footer ---------- */
-  footer{flex:0 0 auto;margin-top:8px;position:relative;z-index:4}
+  footer{flex:0 0 auto;margin-top:10px}
   .ticks{
     height:9px;
     background:repeating-linear-gradient(90deg,var(--line) 0 1px,transparent 1px 11px);
@@ -155,34 +117,22 @@
     mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);
     opacity:.75;
   }
-  .why{text-align:center;font-size:10.5px;letter-spacing:.36em;color:#5f6878;padding-top:13px}
-  .facts{display:flex;justify-content:center;gap:clamp(16px,3.2vw,56px);padding-top:11px;flex-wrap:wrap}
-  .facts span{position:relative;z-index:1;font-size:clamp(12.5px,1.1vw,16px);color:#c4cbda;letter-spacing:.035em;white-space:nowrap}
-  .facts span::before,.why::before{
-    content:'';position:absolute;inset:-17px -24px;z-index:-1;pointer-events:none;
-    background:radial-gradient(ellipse at center,
-      rgba(0,0,0,1) 0%, rgba(0,0,0,.97) 42%, rgba(0,0,0,.70) 68%, rgba(0,0,0,0) 100%);
-    opacity:0;transition:opacity .55s ease;
-  }
-  .why{position:relative;z-index:1}
-  .why::before{inset:-11px -34px}
-  body.lit .facts span::before,body.lit .why::before{opacity:1}
-  .facts b{font-weight:400;color:#fff}
-  .facts em{font-family:var(--serif);font-style:italic;color:#a2b8d8}
-  .facts .ck{color:#6fe0a0}
+  .facts{display:flex;justify-content:space-around;gap:10px;padding-top:9px;flex-wrap:wrap}
+  .facts span{font-size:11px;color:#9aa1b0;letter-spacing:.05em;white-space:nowrap}
+  .facts b{font-weight:400;color:#e6eaf2}
+  .facts em{font-family:var(--serif);font-style:italic;color:#9aa1b0}
 
   .hint{
-    position:absolute;left:50%;bottom:1.2%;transform:translateX(-50%);
+    position:absolute;left:50%;bottom:6px;transform:translateX(-50%);
     font-size:10px;letter-spacing:.2em;color:#4d545f;z-index:4;
     animation:fade 6s ease 3.4s forwards;pointer-events:none;
   }
   @keyframes fade{to{opacity:0}}
 
-  @media (max-width:1000px){
+  @media (max-width:900px){
     .side{display:none}
-    header h1{letter-spacing:.28em;text-indent:.28em}
+    header h1{letter-spacing:.3em;text-indent:.3em}
     #card{width:186px}
-    .glass > *{padding:11px 15px;letter-spacing:.12em}
   }
   @media (prefers-reduced-motion:reduce){
     #card .bars i{animation:none}
@@ -192,12 +142,6 @@
 </head>
 <body>
 <div id="shell">
-  <canvas id="fx"></canvas>
-  <div id="card" aria-hidden="true">
-    <div class="eb"><span class="sw" id="c-sw"></span><span class="kd" id="c-kd">entity</span><span class="id" id="c-id">#0000</span></div>
-    <div class="bars"><i style="width:88%"></i><i style="width:96%"></i><i style="width:54%"></i></div>
-    <div class="ft"><span id="c-src">voice · 00:00</span><span>— — —</span></div>
-  </div>
   <header>
     <div class="rule"></div>
     <h1>VoiceMem</h1>
@@ -207,25 +151,26 @@
   <main>
     <div class="side l">
       <h2><em>Informative</em> Left Brain</h2>
-      <div class="key" data-k="entity"><span class="g"><svg width="13" height="13" viewBox="0 0 11 11"><g fill="none" stroke="#4aa8f0" stroke-width="1.2"><circle cx="5.5" cy="5.5" r="1.6"/><circle cx="5.5" cy="5.5" r="4.6" stroke-dasharray="1.4 1.9"/></g></svg></span>Entities</div>
-      <div class="key" data-k="person"><span class="g"><svg width="13" height="13" viewBox="0 0 11 11"><g fill="none" stroke="#a583ff" stroke-width="1.2"><circle cx="5.5" cy="3.4" r="2.2"/><path d="M1.6 10.2c.6-2.4 2.1-3.6 3.9-3.6s3.3 1.2 3.9 3.6"/></g></svg></span>People</div>
-      <div class="key" data-k="know"><span class="g"><svg width="13" height="13" viewBox="0 0 11 11"><g fill="none" stroke="#58e08d" stroke-width="1.2"><path d="M5.5.9 10 3.4v5.1L5.5 11 1 8.5V3.4z"/><path d="M5.5 5.9 10 3.4M5.5 5.9 1 3.4M5.5 5.9V11"/></g></svg></span>Knowledge</div>
+      <div class="key" data-k="entity"><span class="g"><svg width="11" height="11" viewBox="0 0 11 11"><g fill="none" stroke="#4aa8f0" stroke-width="1.2"><circle cx="5.5" cy="5.5" r="1.6"/><circle cx="5.5" cy="5.5" r="4.6" stroke-dasharray="1.4 1.9"/></g></svg></span>Entities</div>
+      <div class="key" data-k="person"><span class="g"><svg width="11" height="11" viewBox="0 0 11 11"><g fill="none" stroke="#a583ff" stroke-width="1.2"><circle cx="5.5" cy="3.4" r="2.2"/><path d="M1.6 10.2c.6-2.4 2.1-3.6 3.9-3.6s3.3 1.2 3.9 3.6"/></g></svg></span>People</div>
+      <div class="key" data-k="know"><span class="g"><svg width="11" height="11" viewBox="0 0 11 11"><g fill="none" stroke="#58e08d" stroke-width="1.2"><path d="M5.5.9 10 3.4v5.1L5.5 11 1 8.5V3.4z"/><path d="M5.5 5.9 10 3.4M5.5 5.9 1 3.4M5.5 5.9V11"/></g></svg></span>Knowledge</div>
     </div>
 
     <div id="stage">
       <img id="brain" alt="" src="./images/background.png" />
-      <div class="glass">
-        <button type="button" id="btn-explore"><span class="d b"></span>Explore</button>
-        <a href="#" id="btn-code"><span class="d p"></span>Code</a>
-        <a href="#" id="btn-report"><span class="d g"></span>Technical Report</a>
+      <canvas id="fx"></canvas>
+      <div id="card" aria-hidden="true">
+        <div class="eb"><span class="sw" id="c-sw"></span><span class="kd" id="c-kd">entity</span><span class="id" id="c-id">#0000</span></div>
+        <div class="bars"><i style="width:88%"></i><i style="width:96%"></i><i style="width:54%"></i></div>
+        <div class="ft"><span id="c-src">voice · 00:00</span><span>— — —</span></div>
       </div>
     </div>
 
     <div class="side r">
       <h2><em>Emotional</em> Right Brain</h2>
-      <div class="key" data-k="emotion"><span class="g"><svg width="13" height="13" viewBox="0 0 11 11"><path d="M5.5 9.8C2 7.6.6 5.9.9 4.1 1.2 2.5 3.4 1.6 5.5 3.6 7.6 1.6 9.8 2.5 10.1 4.1c.3 1.8-1.1 3.5-4.6 5.7z" fill="none" stroke="#ff5fa2" stroke-width="1.2"/></svg></span>Emotion</div>
-      <div class="key" data-k="exper"><span class="g"><svg width="13" height="13" viewBox="0 0 11 11"><path d="M.5 5.9h2L4 2.2l2 7.1 1.4-3.4h3.1" fill="none" stroke="#ff9a3c" stroke-width="1.2" stroke-linejoin="round"/></svg></span>Experiences</div>
-      <div class="key" data-k="prefer"><span class="g"><svg width="13" height="13" viewBox="0 0 11 11"><path d="m5.5.9 1.5 3.2 3.4.4-2.5 2.4.7 3.4-3.1-1.7-3.1 1.7.7-3.4L.6 4.5l3.4-.4z" fill="none" stroke="#4ade80" stroke-width="1.1" stroke-linejoin="round"/></svg></span>Preference</div>
+      <div class="key" data-k="emotion"><span class="g"><svg width="11" height="11" viewBox="0 0 11 11"><path d="M5.5 9.8C2 7.6.6 5.9.9 4.1 1.2 2.5 3.4 1.6 5.5 3.6 7.6 1.6 9.8 2.5 10.1 4.1c.3 1.8-1.1 3.5-4.6 5.7z" fill="none" stroke="#ff5fa2" stroke-width="1.2"/></svg></span>Emotion</div>
+      <div class="key" data-k="exper"><span class="g"><svg width="11" height="11" viewBox="0 0 11 11"><path d="M.5 5.9h2L4 2.2l2 7.1 1.4-3.4h3.1" fill="none" stroke="#ff9a3c" stroke-width="1.2" stroke-linejoin="round"/></svg></span>Experiences</div>
+      <div class="key" data-k="prefer"><span class="g"><svg width="11" height="11" viewBox="0 0 11 11"><path d="m5.5.9 1.5 3.2 3.4.4-2.5 2.4.7 3.4-3.1-1.7-3.1 1.7.7-3.4L.6 4.5l3.4-.4z" fill="none" stroke="#4ade80" stroke-width="1.1" stroke-linejoin="round"/></svg></span>Preference</div>
     </div>
 
     <div class="hint">MOVE CURSOR OVER THE CORTEX</div>
@@ -233,16 +178,14 @@
 
   <footer>
     <div class="ticks"></div>
-    <div class="why">WHY VOICEMEM</div>
     <div class="facts">
-      <span><b class="ck">✓</b> Vocal : <em>ID voices + print</em></span>
-      <span><b class="ck">✓</b> Emotional : <em>emotion attr.</em></span>
-      <span><b class="ck">✓</b> Fast : <b>160ms</b>, <b>65% reduced</b></span>
-      <span><b class="ck">✓</b> Cheap : <em>top-5 only</em></span>
+      <span>✓ Vocal : <em>ID voices + print</em></span>
+      <span>✓ Emotional : <em>emotion attr.</em></span>
+      <span>✓ Fast : <b>160ms</b>, <b>65% reduced</b></span>
+      <span>✓ Cheap : <em>top-5 only</em></span>
     </div>
   </footer>
 </div>
-
 
 <script>
 (function(){
@@ -253,8 +196,7 @@ const G = {"nodes":[{"x":0.3379,"y":0.2,"k":"label","r":0,"w":"work"},{"x":0.402
    cortex in the actual background image and scale the graph to match.
    scale: shrink/grow the whole graph   dx/dy: nudge it (1 = plate width)
    rightShift: move right-brain nodes horizontally (0.02 = 2% plate width) */
-const CFG = { fit:true, scale:0.82, dx:0, dy:0, rightShift:0.02,
-              grow:1.46, plateDy:0.085 };
+const CFG = { fit:true, scale:0.75, dx:0, dy:0, rightShift:0.02, maxStretch:1.3 };
 const P  = 0.953;                                   // reference plate h/w
 const MY = {
   x0:0.0219, x1:0.9688, y0:0.0361, y1:0.9475, mid:0.4906,
@@ -275,95 +217,64 @@ const cSrc  = document.getElementById('c-src');
 const brain = document.getElementById('brain');
 
 const PAL = {
-  entity:'#4aa8f0', person:'#a583ff', know:'#58e08d',
-  emotion:'#ff5fa2', exper:'#ff9a3c', prefer:'#4ade80',
+  hub:'#ff3d8b', core:'#62c8ff', entity:'#4aa8f0', person:'#a583ff',
+  know:'#58e08d', emotion:'#ff5fa2', exper:'#ff9a3c', prefer:'#4ade80',
   label:'#ffffff', user:'#d02fa8'
 };
 const MONOF = getComputedStyle(document.body).fontFamily;
 const LABEL = {
-  entity:'Entity', person:'Person', know:'Knowledge',
-  emotion:'Emotion', exper:'Experience', prefer:'Preference',
+  hub:'Core Index', core:'Entity Cluster', entity:'Entity', person:'Person',
+  know:'Knowledge', emotion:'Emotion', exper:'Experience', prefer:'Preference',
   label:'Cluster', user:'You · owner'
 };
 const SRC = {
-  entity:'voice · 00:', person:'voice · 00:', know:'derived · note',
-  emotion:'valence · —', exper:'episode · 00:', prefer:'inferred · —',
+  hub:'index · rebuilt', core:'cluster · 12 refs', entity:'voice · 00:',
+  person:'voice · 00:', know:'derived · note', emotion:'valence · —',
+  exper:'episode · 00:', prefer:'inferred · —',
   label:'cluster · ', user:'identity · anchor'
 };
-const GROUP = { entity:['entity'], person:['person','user'], know:['know'],
+const GROUP = { entity:['entity','core','hub'], person:['person','user'], know:['know'],
                 emotion:['emotion'], exper:['exper'], prefer:['prefer'] };
 
 /* ---------- node runtime ---------- */
 const N = G.nodes.map((n,i)=>({
   bx:n.x, by:n.y, side:(n.x < MY.mid ? 'L' : 'R'), sx:0, sy:0,
-  k:n.k, r:n.r, w:n.w||'', bw:0, bh:0,
+  k:n.k, r:n.r, c:n.c, w:n.w||'', bw:0, bh:0,
   ph:Math.random()*Math.PI*2, ph2:Math.random()*Math.PI*2,
   sp:0.28+Math.random()*0.42, ax:0.55+Math.random()*0.9, ay:0.55+Math.random()*0.9,
-  x:0, y:0, h:0, p:0, f:1, iv:0, se:0, hp:0, id:i,
-  dl: 0.35 + n.x*1.05
+  x:0, y:0, h:0, p:0, f:1, iv:0, id:i,
+  dl: 0.35 + n.x*1.05 + (n.k==='hub'?-0.3:0)
 }));
 const L = G.links;
 const CROSS = L.filter(l=>l.t==='cross').map(l=>({l}));
-const CROSSL = L.filter(l=>l.t==='cross');
 const USER = N.findIndex(n=>n.k==='user');
-const PULSE = { t:-0.6, dur:2.3, gap:1.9, trail:0.30, seg:16 };
+const PULSE = { t:-0.6, dur:2.3, gap:1.9, trail:0.30, seg:30 };
 const ADJ = N.map(()=>[]);
 const NB  = N.map(()=>[]);
 L.forEach((l,i)=>{ ADJ[l.a].push(i); ADJ[l.b].push(i); NB[l.a].push(l.b); NB[l.b].push(l.a); });
 N.forEach((n,i)=>{ n.cnt = L.reduce((s,l)=> s + ((l.t==='in' && l.a===i)?1:0), 0); });
 
-const KIND = {};
-N.forEach(n=>{ (KIND[n.k] = KIND[n.k]||[]).push(n.id); });
-
-const HOT = [];
-const LITSTAMP = new Int32Array(N.length); let stampV = 0;
 const LSTYLE = {
   in:    ['rgba(150,192,235,',0.19,0.75],
   box:   ['rgba(171,133,255,',0.46,2.30],
+  spine: ['rgba(232,240,255,',0.26,0.90],
+  spoke: ['rgba(186,212,246,',0.13,0.70],
   field: ['rgba(255,170,200,',0.17,0.80],
   cross: ['rgba(214,228,255,',0.20,1.45]
 };
 
-const LGROUPS = (()=>{
-  const m = {};
-  for(const l of L){
-    const k = (l.t||'in')+'|'+(l.w||1);
-    (m[k] = m[k] || { st:(LSTYLE[l.t]||LSTYLE.in), w:(l.w||1), list:[] }).list.push(l);
-  }
-  return Object.keys(m).map(k=>m[k]);
-})();
-
 /* ---------- sizing ---------- */
-let W=0,H=0,S=1,DPR=1,IW=0,IH=0,OX=0,OY=0,K=1,CX=0,CY=0,TOPY=0;
+let W=0,H=0,S=1,DPR=1,IW=0,IH=0,OX=0,OY=0,K=1,CX=0,CY=0;
 let AR = 1000/953;       // overwritten by the plate's own ratio once loaded
 function resize(){
-  W = window.innerWidth; H = window.innerHeight;
-  DPR = Math.min(1.5, window.devicePixelRatio||1);
+  const r = stage.getBoundingClientRect();
+  W = r.width; H = r.height;
+  DPR = Math.min(2, window.devicePixelRatio||1);
   cv.width = Math.round(W*DPR); cv.height = Math.round(H*DPR);
   ctx.setTransform(DPR,0,0,DPR,0,0);
-
-  const band = Math.round(Math.max(140, Math.min(230, H*0.215)));
-  document.documentElement.style.setProperty('--disc', band+'px');
-
-  // The cortex is deliberately larger than its flex box and allowed to spill:
-  // the action bar rides over it and its lower edge dissolves into the
-  // platter. grow = how much taller than the box the plate may run,
-  // plateDy nudges it down so the overflow lands low, not on the title.
-  const r = stage.getBoundingClientRect();
-  const boxW = r.width, boxH = r.height*CFG.grow;
-  const bcx = r.left + r.width/2, bcy = r.top + r.height/2 + r.height*CFG.plateDy;
-  IW = boxW; IH = boxW/AR;                  // letterbox exactly like object-fit:contain
-  if(IH > boxH){ IH = boxH; IW = boxH*AR; }
-  OX = bcx - IW/2;
-  OY = bcy - IH/2;
-  brain.style.left   = (OX-r.left).toFixed(1)+'px';
-  brain.style.top    = (OY-r.top ).toFixed(1)+'px';
-  brain.style.width  = IW.toFixed(1)+'px';
-  brain.style.height = IH.toFixed(1)+'px';
-  // the query line rides at the top of the CORTEX, but never above the
-  // masthead — the plate is allowed to overflow its box, the scan line is not
-  TOPY = Math.max(r.top + 8, OY + IH*0.085);
-
+  IW = W; IH = W/AR;                       // letterbox exactly like object-fit:contain
+  if(IH > H){ IH = H; IW = H*AR; }
+  OX = (W-IW)/2; OY = (H-IH)/2;
   // one uniform transform for the whole graph, so the two halves keep the
   // spacing they were drawn with; the scale is capped by the narrower
   // hemisphere of the supplied plate so nothing spills past the outline
@@ -381,216 +292,45 @@ function resize(){
     n.sy = CY + (n.by-mcy)*P*K;
   }
   buildGlow();
-  buildDisc(band);
 }
 new ResizeObserver(resize).observe(stage);
-window.addEventListener('resize', resize);
 
 /* ---------- pre-rendered glow sprites ---------- */
 const GLOW = {};
-let BRASSGLOW = null, WHITEGLOW = null;
-function radial(col, R, a0){
-  const c = document.createElement('canvas');
-  c.width = c.height = R*2;
-  const g = c.getContext('2d');
-  const rg = g.createRadialGradient(R,R,0,R,R,R);
-  rg.addColorStop(0,   hexa(col,a0));
-  rg.addColorStop(.28, hexa(col,a0*0.36));
-  rg.addColorStop(.62, hexa(col,a0*0.09));
-  rg.addColorStop(1,   hexa(col,0));
-  g.fillStyle = rg; g.fillRect(0,0,R*2,R*2);
-  return c;
-}
 function buildGlow(){
   for(const k in PAL){
     if(k==='label') continue;
-    GLOW[k] = radial(PAL[k], Math.max(18, Math.round((k==='user'? 150 : 56)*S)), .55);
+    const R = Math.max(18, Math.round((k==='user'? 150 : 56)*S));
+    const c = document.createElement('canvas');
+    c.width = c.height = R*2;
+    const g = c.getContext('2d');
+    const rg = g.createRadialGradient(R,R,0,R,R,R);
+    const col = PAL[k];
+    rg.addColorStop(0,   hexa(col,.55));
+    rg.addColorStop(.28, hexa(col,.20));
+    rg.addColorStop(.62, hexa(col,.05));
+    rg.addColorStop(1,   hexa(col,0));
+    g.fillStyle = rg; g.fillRect(0,0,R*2,R*2);
+    GLOW[k] = c;
   }
-  BRASSGLOW = radial('#ffc154', 46, .85);
-  WHITEGLOW = radial('#dfefff', 40, .85);
 }
 function hexa(h,a){
   const n = parseInt(h.slice(1),16);
   return 'rgba('+(n>>16)+','+(n>>8&255)+','+(n&255)+','+a+')';
 }
 
-/* =======================================================================
-   THE PLATTER — a disc whose centre sits directly beneath the cortex in
-   3-D, so what reaches the screen is its NEAR rim: full width up under the
-   brain, curving away into the corners as it comes toward the viewer.
-   Rows stay horizontal and butt straight up against each other, but they
-   are laid on a receding ground plane: each row toward the back is shorter
-   and its 2:1 blocks narrower, and the columns converge on the vanishing
-   line under the cortex. Every block carries its own m.### address.
-   Everything static is baked once into an offscreen plate; per frame only
-   the handful of blocks currently lit are touched.
-   ===================================================================== */
-const DISC = { tiles:[], map:null, hot:[], live:[], base:null, plit:null, litFlag:false,
-               cx:0, cy:0, RX:1, RY:1, hz:0, top:0, ramp:1, on:0 };
-function buildDisc(band){
-  DISC.top  = H - band;
-  DISC.ramp = band*0.95;
-  const maskTop = Math.max(0, DISC.top - DISC.ramp);
-  const dcx = DISC.cx = CX;
-  const dcy = DISC.cy = OY + IH*0.80;                       // just under the cortex
-  const RY  = DISC.RY = Math.max(140, (H + band*0.02) - dcy);
-  const RX  = DISC.RX = Math.max(W*0.60, RY*3.2);
-  const hz  = DISC.hz = dcy;                                // vanishing line
-  const span = Math.max(1, H - hz);
-  const rowH = Math.max(12, band*0.145);                    // row height up front
-  const dep  = y => 0.24 + 0.76*Math.min(1, Math.max(0, (y-hz)/span));
-
-  // rows marched from the near edge backwards, each shorter than the last
-  const rows = [];
-  let yb = H + rowH*0.55;
-  for(let g=0; g<220; g++){
-    const s = dep(yb), h = rowH*s;
-    const yt = yb - h;
-    if(yt < maskTop) break;
-    rows.push({ y:yt, h, s });
-    yb = yt;
-  }
-
-  const cw = rowH*2;                        // 2:1 blocks, measured at the near edge
-  const tiles = [], map = new Map();
-  for(let ri=0; ri<rows.length; ri++){
-    const R = rows[ri], w = cw*R.s, cy = R.y + R.h/2;
-    const uy = (cy-dcy)/RY;
-    if(uy*uy >= 1) continue;
-    const half = RX*Math.sqrt(1-uy*uy);
-    const lim  = Math.min(half, W/2 + w*2 + Math.abs(dcx-W/2));
-    const m    = Math.min(1, Math.max(0, (cy-maskTop)/DISC.ramp));
-    const jMax = Math.ceil(lim/w);
-    for(let j=-jMax; j<=jMax; j++){
-      const x = dcx + j*w - w/2;
-      if(x+w < -w || x > W+w) continue;
-      if(Math.abs(dcx + j*w - dcx) > half) continue;
-      const t = { x, y:R.y, w:Math.max(1.5,w-1), h:Math.max(1.2,R.h-1),
-                  cx:x+w/2, cy, row:ri, col:j, s:R.s,
-                  e:0, on:false, m:m*m*m, tone:0.42+Math.random()*0.58,
-                  d:Math.min(1, Math.max(0,(cy-maskTop)/Math.max(1,H-maskTop))),
-                  sn:'m.'+String((Math.abs(j)*37 + ri*113 + 7) % 1000).padStart(3,'0') };
-      map.set(ri*8192 + (j+4096), tiles.length);
-      tiles.push(t);
-    }
-  }
-  DISC.tiles = tiles; DISC.map = map; DISC.live.length = 0;
-  DISC.hot = tiles.map((t,i)=>t.m>0.45?i:-1).filter(i=>i>=0);
-  if(!DISC.hot.length) DISC.hot = tiles.map((t,i)=>i);
-
-  // ---- bake the plate TWICE: the resting near-black face and the fully
-  //      powered one. At runtime that is two blits instead of six. --------
-  const bt = maskTop, bh = Math.max(1, H-maskTop);
-  const plate = boost => {
-    const bc = document.createElement('canvas');
-    bc.width = Math.max(1,Math.round(W*DPR)); bc.height = Math.max(1,Math.round(bh*DPR));
-    const g = bc.getContext('2d');
-    g.setTransform(DPR,0,0,DPR,0,0);
-    g.translate(0,-bt);
-    g.textAlign='center'; g.textBaseline='middle';
-    const A = v => Math.min(1, v*boost).toFixed(4);
-    for(const t of tiles){
-      const k = t.tone*t.m;
-      // the face catches more light the closer it is to the viewer
-      const dd = t.d*t.d*(3-2*t.d);          // steep front-to-back falloff
-      g.fillStyle = 'rgba(196,146,58,'+A((0.0030+0.0125*dd)*k)+')';
-      g.fillRect(t.x, t.y, t.w, t.h);
-      g.strokeStyle = 'rgba(232,182,88,'+A((0.0055+0.0230*dd)*k)+')';
-      g.lineWidth = 1; g.strokeRect(t.x+.5, t.y+.5, t.w-1, t.h-1);
-      // a hairline along the top edge reads as the block's raised front face
-      g.strokeStyle = 'rgba(255,214,140,'+A((0.0040+0.0175*dd)*k)+')';
-      g.beginPath(); g.moveTo(t.x+1, t.y+1.2); g.lineTo(t.x+t.w-1, t.y+1.2); g.stroke();
-      if(t.h >= 9){
-        g.font = (t.h*0.52).toFixed(1)+'px '+MONOF;
-        g.fillStyle = 'rgba(255,206,128,'+A((0.0085+0.0260*dd)*k)+')';
-        g.fillText(t.sn, t.cx, t.cy+0.5);
-      }
-    }
-    // a whisper of a rim along the leading edge, so the silhouette still reads
-    g.beginPath();
-    g.ellipse(dcx, dcy, RX, RY, 0, 0.12, Math.PI-0.12);
-    g.strokeStyle = 'rgba(232,182,88,'+A(.055)+')'; g.lineWidth = 1.4; g.stroke();
-    return bc;
-  };
-  DISC.base = plate(1); DISC.plit = plate(4.6);
-  DISC.baseTop = bt; DISC.baseH = bh;
-}
-function drawDisc(dt){
-  if(!DISC.base) return;
-  const want = (SR.st==='dump') ? 1 : 0;
-  DISC.on += (want - DISC.on) * (want ? .08 : .035);
-  const lit = DISC.on > .10;
-  if(lit !== DISC.litFlag){ DISC.litFlag = lit; document.body.classList.toggle('lit', lit); }
-
-  ctx.drawImage(DISC.base, 0, DISC.baseTop, W, DISC.baseH);
-  if(DISC.on > .01){
-    ctx.globalCompositeOperation='lighter';
-    ctx.globalAlpha = DISC.on;
-    ctx.drawImage(DISC.plit, 0, DISC.baseTop, W, DISC.baseH);
-    ctx.globalAlpha = 1;
-    const lg = ctx.createLinearGradient(0, DISC.top-30, 0, DISC.top+70);
-    lg.addColorStop(0,'rgba(224,169,74,0)');
-    lg.addColorStop(.4,'rgba(224,169,74,'+(0.06*DISC.on).toFixed(3)+')');
-    lg.addColorStop(1,'rgba(224,169,74,0)');
-    ctx.fillStyle = lg; ctx.fillRect(0, DISC.top-30, W, 100);
-    ctx.globalCompositeOperation='source-over';
-  }
-
-  const T = DISC.tiles, live = DISC.live;
-  if(!live.length) return;
-  ctx.globalCompositeOperation='lighter';
-  ctx.textAlign='center'; ctx.textBaseline='middle';
-  for(let i=live.length-1; i>=0; i--){
-    const t = T[live[i]], e = t.e;
-    ctx.fillStyle = 'rgba(255,190,92,'+(0.62*e*t.tone).toFixed(3)+')';
-    ctx.fillRect(t.x, t.y, t.w, t.h);
-    ctx.strokeStyle = 'rgba(255,236,190,'+(0.82*e).toFixed(3)+')';
-    ctx.lineWidth = 1.1; ctx.strokeRect(t.x+.5, t.y+.5, t.w-1, t.h-1);
-    if(t.h >= 9){
-      ctx.font = (t.h*0.52).toFixed(1)+'px '+MONOF;
-      ctx.fillStyle = 'rgba(255,240,205,'+(0.85*e).toFixed(3)+')';
-      ctx.fillText(t.sn, t.cx, t.cy+0.5);
-    }
-    if(e > .25 && BRASSGLOW){
-      const k = t.w*(0.55 + 0.75*e);
-      ctx.globalAlpha = Math.min(1, e*.8);
-      ctx.drawImage(BRASSGLOW, t.cx-k, t.cy-k*0.6, k*2, k*1.2);
-      ctx.globalAlpha = 1;
-    }
-    t.e = e - (dt*e*1.9 + dt*0.05);
-    if(t.e < .006){ t.e = 0; t.on = false; live.splice(i,1); }
-  }
-  ctx.globalCompositeOperation='source-over';
-}
-function lightTile(i, v){
-  const T = DISC.tiles; if(!T.length) return;
-  i = ((i % T.length)+T.length) % T.length;
-  const t = T[i];
-  t.e = Math.min(1.4, t.e + v*(0.30+0.70*t.m));
-  if(!t.on){ t.on = true; DISC.live.push(i); }
-  for(const d of [[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]]){
-    const j = DISC.map.get((t.row+d[0])*8192 + (t.col+d[1]+4096));
-    if(j===undefined) continue;
-    const o = T[j], f = (Math.abs(d[0])+Math.abs(d[1]))===1 ? .40 : .17;
-    o.e = Math.min(1.1, o.e + v*f*(0.30+0.70*o.m));
-    if(!o.on){ o.on = true; DISC.live.push(j); }
-  }
-}
-function randTile(){ return DISC.hot[rnd(DISC.hot.length)] || 0; }
-
 /* ---------- pointer ---------- */
 let mx=-9999, my=-9999, has=false, sel=-1, selPrev=-1;
 let cardX=0, cardY=0, cardTX=0, cardTY=0, cardSide=1, cardShown=false;
-let cardW=214, cardH=90, cardMeasured=-1;
-function pt(e){
-  if(e.target && e.target.closest && e.target.closest('.glass,.side,header,footer')){
-    has=false; mx=my=-9999; return;
-  }
-  mx = e.clientX; my = e.clientY; has = true;
-}
-window.addEventListener('pointermove', pt, {passive:true});
-window.addEventListener('pointerdown', pt, {passive:true});
-document.addEventListener('pointerleave', ()=>{ has=false; mx=my=-9999; }, {passive:true});
+stage.addEventListener('pointermove', e=>{
+  const r = cv.getBoundingClientRect();
+  mx = e.clientX-r.left; my = e.clientY-r.top; has = true;
+}, {passive:true});
+stage.addEventListener('pointerdown', e=>{
+  const r = cv.getBoundingClientRect();
+  mx = e.clientX-r.left; my = e.clientY-r.top; has = true;
+}, {passive:true});
+stage.addEventListener('pointerleave', ()=>{ has=false; mx=my=-9999; }, {passive:true});
 
 /* ---------- legend focus ---------- */
 let focus = null;
@@ -600,278 +340,17 @@ document.querySelectorAll('.key').forEach(el=>{
   el.addEventListener('pointerleave', ()=>set(null));
 });
 
-/* =======================================================================
-   RETRIEVAL SWEEP
-   scan   a line rides in above the cortex and lights up
-   fan    the query leaves that line and reaches BOTH hemispheres at once,
-          landing on several left-brain schemas/entities and several
-          right-brain affect nodes simultaneously
-   hop    every landing takes exactly one further hop:
-            left  -> schema<->entity inside its own hemisphere, AND across
-                     the callosum into the right
-            right -> across the callosum into the left, nothing else
-          each landing also spills a short one-hop pulse down its edges
-   dump   every node it lit writes down to a random block of the platter
-   ===================================================================== */
-const SR = { st:'idle', t:0, beams:[], endT:0, hops:[], drops:[], dumpT:0,
-             vis:[], origin:null, cool:1.6, scanA:0 };
-const AUTO = !REDUCED;
-const rnd = n => Math.floor(Math.random()*n);
-function shuf(a){ for(let i=a.length-1;i>0;i--){ const j=rnd(i+1); const t=a[i];a[i]=a[j];a[j]=t; } return a; }
-function pickNb(id, pred, avoid){
-  const c = NB[id].filter(b => pred(b) && (!avoid || avoid.indexOf(b)<0));
-  if(!c.length){ const d = NB[id].filter(pred); return d.length ? d[rnd(d.length)] : null; }
-  return c[rnd(c.length)];
-}
-function crossPartner(id, want){
-  const c = CROSSL.filter(l => l.a===id || l.b===id)
-                  .map(l => l.a===id ? l.b : l.a)
-                  .filter(o => N[o].side===want);
-  return c.length ? c[rnd(c.length)] : null;
-}
-function buildPlan(){
-  const beams = [];
-  const labs   = shuf((KIND.label||[]).slice());
-  const ents   = shuf([].concat(KIND.entity||[], KIND.person||[], KIND.know||[]));
-  const rights = shuf(N.filter(n=>n.side==='R').map(n=>n.id));
-
-  // --- wave 0: one query, both hemispheres, all at the same instant -------
-  const targets = [];
-  for(let i=0;i<2 && i<labs.length;i++)   targets.push(labs[i]);
-  for(let i=0;i<2 && i<ents.length;i++)   targets.push(ents[i]);
-  for(let i=0;i<3 && i<rights.length;i++) targets.push(rights[i]);
-  const land = [];
-  shuf(targets).forEach((id,i)=>{
-    const dur = 0.46 + Math.random()*0.30;
-    const t0  = 0.02 + i*0.035;
-    beams.push({ from:null, to:id, t0, dur, k:'entry', done:false });
-    land.push({ id, end:t0+dur });
-  });
-
-  // --- wave 1: exactly one hop out of every landing -----------------------
-  for(const e of land){
-    const n = N[e.id];
-    if(n.side==='L'){
-      // schema <-> entity, staying inside the informative hemisphere
-      const isLab = n.k==='label';
-      const step = pickNb(e.id, b => N[b].side==='L' && (N[b].k==='label') !== isLab);
-      if(step!=null)
-        beams.push({ from:e.id, to:step, t0:e.end+0.05,
-                     dur:.28+Math.random()*.20, k:'walk', done:false });
-      // ...and across the callosum
-      const over = crossPartner(e.id,'R') || rights[rnd(rights.length)];
-      if(over!=null)
-        beams.push({ from:e.id, to:over, t0:e.end+0.13,
-                     dur:.40+Math.random()*.24, k:'cross', done:false });
-    } else {
-      // the emotional hemisphere only ever reaches back into the left
-      let back = crossPartner(e.id,'L');
-      if(back==null) back = pickNb(e.id, b => N[b].side==='L');
-      if(back==null) back = labs[rnd(labs.length)];
-      if(back!=null)
-        beams.push({ from:e.id, to:back, t0:e.end+0.09,
-                     dur:.40+Math.random()*.24, k:'cross', done:false });
-    }
-  }
-  return beams;
-}
-function startSearch(){
-  if(SR.st!=='idle') return;
-  const beams = buildPlan();
-  if(!beams.length) return;
-  SR.beams = beams;
-  SR.endT = beams.reduce((m,b)=>Math.max(m, b.t0+b.dur), 0);
-  SR.t = 0; SR.dumpT = 0;
-  SR.hops.length = 0; SR.drops.length = 0; SR.vis.length = 0;
-  SR.st = 'scan';
-}
-function visit(id){
-  N[id].se = 1;
-  if(SR.vis.indexOf(id)<0) SR.vis.push(id);
-  const nb = shuf(NB[id].slice()).slice(0, 3+rnd(3));
-  for(const b of nb) SR.hops.push({a:id, b:b, u:0, dur:.28+Math.random()*.24});
-}
-/* every beam is re-evaluated from live node positions each frame */
-function beamFn(b){
-  const to = N[b.to], p1 = [to.x, to.y];
-  const p0 = b.from==null ? SR.origin : [N[b.from].x, N[b.from].y];
-  if(!p0) return null;
-  let cx, cy;
-  if(b.k==='cross' && b.from!=null){
-    const c = ctl(N[b.from], to); cx = c[0]; cy = c[1];
-  } else {
-    const dx = p1[0]-p0[0], dy = p1[1]-p0[1];
-    const bow = b.k==='entry' ? 0.10 : 0.17;
-    cx = (p0[0]+p1[0])/2 - dy*bow; cy = (p0[1]+p1[1])/2 + dx*bow;
-  }
-  return u => { const iu = 1-u;
-    return [iu*iu*p0[0]+2*iu*u*cx+u*u*p1[0], iu*iu*p0[1]+2*iu*u*cy+u*u*p1[1]]; };
-}
-function stepSearch(dt){
-  if(SR.st==='idle'){
-    SR.scanA = Math.max(0, SR.scanA - dt*0.9);
-    if(AUTO && (SR.cool -= dt) <= 0){ SR.cool = 5.2 + Math.random()*2.4; startSearch(); }
-  } else if(SR.st==='scan'){
-    SR.t += dt/0.85; SR.scanA = Math.min(1, SR.scanA + dt*3);
-    if(SR.t >= 1){
-      SR.origin = [OX + IW*0.50, TOPY];
-      SR.st = 'fan'; SR.t = 0;
-    }
-  } else if(SR.st==='fan'){
-    SR.t += dt;
-    SR.scanA = Math.max(0.16, SR.scanA - dt*0.5);
-    for(const b of SR.beams){
-      if(b.done) continue;
-      if(SR.t >= b.t0 + b.dur){ b.done = true; visit(b.to); }
-    }
-    if(SR.t > SR.endT + 0.45){
-      SR.st = 'dump'; SR.dumpT = 0;
-      SR.drops = [];
-      shuf(SR.vis.slice()).slice(0,16).forEach((id,i)=>{
-        const k = 1 + rnd(2);
-        for(let q=0;q<k;q++){
-          const dur = .52 + Math.random()*.42;
-          SR.drops.push({ id, ti: randTile(), dur,
-                          u: -(i*0.045 + q*0.09 + Math.random()*0.45)/dur, done:false });
-        }
-      });
-    }
-  } else if(SR.st==='dump'){
-    SR.dumpT += dt;
-    SR.scanA = Math.max(0, SR.scanA - dt*0.9);
-    let live = false;
-    for(const d of SR.drops){
-      d.u += dt/d.dur;
-      if(d.u >= 1 && !d.done){ d.done = true; lightTile(d.ti, 1); }
-      if(!d.done) live = true;
-    }
-    if(!live && SR.dumpT > 1.8){ SR.st = 'idle'; SR.cool = 4.4 + Math.random()*2.6; }
-  }
-
-  for(const h of SR.hops){
-    if(h.u >= 1) continue;
-    h.u += dt/h.dur;
-    if(h.u >= 1){ N[h.b].hp = 1; if(Math.random()<.5 && SR.vis.indexOf(h.b)<0) SR.vis.push(h.b); }
-  }
-}
-
-/* trail helper — a tapering comet along an arbitrary parametric path.
-   The path is sampled once into a shared buffer; the soft halo is a single
-   constant-width stroke and only the bright core is drawn segment by
-   segment, which is where the taper actually reads. */
-const TBUF = new Float32Array(128);
-function trail(at, head, len, seg, w, core, halo, f){
-  const STEP = len/seg;
-  let n = 0;
-  for(let i=seg; i>=0; i--){
-    const u = head - i*STEP;
-    if(u <= 0 || u >= 1) continue;
-    const q = at(u);
-    TBUF[n<<1] = q[0]; TBUF[(n<<1)+1] = q[1]; n++;
-    if(n >= 63) break;
-  }
-  if(n < 2) return;
-  const LWs = Math.max(.8,S);
-  ctx.strokeStyle = halo(0.085*f);
-  ctx.lineWidth = (w*3.0 + 1.2)*LWs;
-  ctx.beginPath(); ctx.moveTo(TBUF[0],TBUF[1]);
-  for(let i=1;i<n;i++) ctx.lineTo(TBUF[i<<1], TBUF[(i<<1)+1]);
-  ctx.stroke();
-  for(let i=1;i<n;i++){
-    const k = i/(n-1), e = k*k*(3-2*k);
-    ctx.strokeStyle = core(0.66*e*f);
-    ctx.lineWidth = (w*e + .5)*LWs;
-    ctx.beginPath();
-    ctx.moveTo(TBUF[(i-1)<<1], TBUF[((i-1)<<1)+1]);
-    ctx.lineTo(TBUF[i<<1], TBUF[(i<<1)+1]);
-    ctx.stroke();
-  }
-}
-const CORE_W = a => 'rgba(255,255,255,'+a.toFixed(3)+')';
-const HALO_B = a => 'rgba(150,200,255,'+a.toFixed(3)+')';
-const CORE_A = a => 'rgba(255,226,168,'+a.toFixed(3)+')';
-const HALO_A = a => 'rgba(255,170,60,'+a.toFixed(3)+')';
-
-function drawSearch(t){
-  if(SR.st==='idle' && SR.scanA<=0.01) return;
-  ctx.globalCompositeOperation='lighter';
-  ctx.lineCap='round'; ctx.lineJoin='round';
-
-  // the scan line riding above the cortex
-  if(SR.scanA > .01){
-    const y = TOPY;
-    const x0 = OX + IW*0.10, x1 = OX + IW*0.90;
-    const g = ctx.createLinearGradient(x0,0,x1,0);
-    g.addColorStop(0,'rgba(140,200,255,0)');
-    g.addColorStop(.5,'rgba(190,225,255,'+(0.42*SR.scanA).toFixed(3)+')');
-    g.addColorStop(1,'rgba(140,200,255,0)');
-    ctx.strokeStyle = g; ctx.lineWidth = 1.2*Math.max(.8,S);
-    ctx.beginPath(); ctx.moveTo(x0,y); ctx.lineTo(x1,y); ctx.stroke();
-    const hx = SR.st==='scan' ? x0 + (x1-x0)*ease(SR.t)
-                              : (SR.origin ? SR.origin[0] : (x0+x1)/2);
-    if(WHITEGLOW){
-      const k = 30*Math.max(.7,S);
-      ctx.globalAlpha = SR.scanA;
-      ctx.drawImage(WHITEGLOW, hx-k, y-k*0.5, k*2, k);
-      ctx.globalAlpha = 1;
-    }
-    ctx.fillStyle='rgba(255,255,255,'+(0.9*SR.scanA).toFixed(3)+')';
-    ctx.beginPath(); ctx.arc(hx,y,1.9*Math.max(.8,S),0,6.2832); ctx.fill();
-  }
-
-  // every live beam of the fan-out
-  if(SR.st==='fan'){
-    for(const b of SR.beams){
-      const u = (SR.t - b.t0)/b.dur;
-      if(u <= 0 || u > 1.30) continue;
-      const at = beamFn(b); if(!at) continue;
-      const lead = b.k==='entry' ? 1 : 0.86;
-      trail(at, Math.min(1,u), b.k==='entry'?0.52:0.46,
-            b.k==='entry'?12:10, b.k==='cross'?1.6:1.5, CORE_W, HALO_B, lead);
-    }
-  }
-
-  // one-hop spill along incident edges
-  for(const h of SR.hops){
-    if(h.u <= 0 || h.u > 1.25) continue;
-    const a = N[h.a], b = N[h.b];
-    const at = u => [a.x+(b.x-a.x)*u, a.y+(b.y-a.y)*u];
-    trail(at, Math.min(1,h.u), 0.5, 6, 1.15, CORE_W, HALO_B, 0.72);
-  }
-
-  // write beams into the platter
-  if(SR.st==='dump'){
-    for(const d of SR.drops){
-      if(d.u <= 0 || d.u > 1) continue;
-      const n = N[d.id], T = DISC.tiles[d.ti % DISC.tiles.length];
-      if(!T) continue;
-      const ax=n.x, ay=n.y, bx=T.x, by=T.y;
-      const cx = ax + (bx-ax)*0.16, cy = ay + (by-ay)*0.80;
-      const at = u => { const iu=1-u;
-        return [iu*iu*ax+2*iu*u*cx+u*u*bx, iu*iu*ay+2*iu*u*cy+u*u*by]; };
-      trail(at, d.u, 0.42, 11, 1.5, CORE_A, HALO_A, 1);
-    }
-  }
-  ctx.globalCompositeOperation='source-over';
-}
-function ease(u){ u=Math.min(1,Math.max(0,u)); return u*u*(3-2*u); }
-
 /* ---------- loop ---------- */
-let t0 = performance.now(), tPrev = t0, introDone = false;
+let t0 = performance.now(), tPrev = t0;
 function frame(now){
   const t = (now-t0)/1000;
   const dt = Math.min(0.05, (now-tPrev)/1000); tPrev = now;
   ctx.clearRect(0,0,W,H);
 
-  // intro sweep — stops costing anything the moment it has finished
-  if(!introDone){
-    let all = true;
-    for(const n of N){
-      const u = Math.min(1, Math.max(0, (t-n.dl)/0.75));
-      n.iv = 1-Math.pow(1-u,3);
-      if(n.iv < 1) all = false;
-    }
-    introDone = all;
+  // intro sweep
+  for(const n of N){
+    const u = Math.min(1, Math.max(0, (t-n.dl)/0.75));
+    n.iv = 1-Math.pow(1-u,3);
   }
 
   // positions
@@ -880,8 +359,6 @@ function frame(now){
     n.x = n.sx + Math.sin(t*n.sp + n.ph)*amp*n.ax;
     n.y = n.sy + Math.cos(t*n.sp*0.83 + n.ph2)*amp*n.ay;
   }
-
-  stepSearch(dt);
 
   // nearest node to cursor
   let best=-1, bd=1e9;
@@ -902,11 +379,9 @@ function frame(now){
 
   // per-node easing — everything wired to the hovered node lifts with it
   const fieldR = 150*S;
-  stampV++;
-  if(sel>=0){ const nb = NB[sel]; for(let i=0;i<nb.length;i++) LITSTAMP[nb[i]] = stampV; }
-  const busy = SR.st!=='idle';
+  const lit = new Set(sel>=0 ? NB[sel] : []);
   for(const n of N){
-    const tgtH = (n.id===sel) ? 1 : (LITSTAMP[n.id]===stampV ? 0.42 : 0);
+    const tgtH = (n.id===sel) ? 1 : (lit.has(n.id) ? 0.42 : 0);
     n.h += (tgtH-n.h) * (tgtH ? .22 : .10);
     let p = 0;
     if(has){
@@ -916,45 +391,24 @@ function frame(now){
     n.p += (p-n.p)*.14;
     const tgtF = (!focus || n.k==='label' || GROUP[focus].indexOf(n.k)>=0) ? 1 : .16;
     n.f += (tgtF-n.f)*.12;
-    if(n.se>0) n.se = Math.max(0, n.se - dt*(busy ? .16 : .85));
-    if(n.hp>0) n.hp = Math.max(0, n.hp - dt*(busy ? .32 : 1.15));
   }
 
-  /* links — every link sitting at rest is folded into one path per style,
-     so a quiet frame costs a handful of strokes instead of five hundred */
+  /* links */
   ctx.lineCap = 'round';
-  const LW = Math.max(.72,S);
-  HOT.length = 0;
-  for(const g of LGROUPS){
-    const st = g.st;
-    ctx.strokeStyle = st[0]+Math.min(.95, st[1]*g.w).toFixed(3)+')';
-    ctx.lineWidth = st[2]*LW;
-    ctx.beginPath();
-    let any = false;
-    for(const l of g.list){
-      const a=N[l.a], b=N[l.b];
-      if(a.h+b.h+a.p+b.p+a.se+b.se+a.hp+b.hp > .006 || a.f<.995 || b.f<.995
-         || a.iv<.995 || b.iv<.995){ HOT.push(l); continue; }
-      ctx.moveTo(a.x,a.y);
-      if(l.t==='cross'){ const c = ctl(a,b); ctx.quadraticCurveTo(c[0],c[1],b.x,b.y); }
-      else ctx.lineTo(b.x,b.y);
-      any = true;
-    }
-    if(any) ctx.stroke();
-  }
-  for(const l of HOT){
+  for(const l of L){
     const a=N[l.a], b=N[l.b];
     const st = LSTYLE[l.t] || LSTYLE.in;
-    const lift = Math.max(a.h,b.h)*.38 + Math.max(a.p,b.p)*.14
-               + Math.min(a.se+a.hp, b.se+b.hp)*.55;
-    const al = (st[1]*(l.w||1) + lift) * Math.min(a.f,b.f) * Math.min(a.iv,b.iv);
+    const lift = Math.max(a.h,b.h)*.38 + Math.max(a.p,b.p)*.14;
+    const fade = Math.min(a.f,b.f);
+    const al = (st[1]*(l.w||1) + lift) * fade * Math.min(a.iv,b.iv);
     if(al<=0.006) continue;
-    ctx.strokeStyle = st[0]+Math.min(.95,al).toFixed(3)+')';
-    ctx.lineWidth = (st[2]*(1+lift*1.5))*LW;
+    ctx.strokeStyle = st[0]+al.toFixed(3)+')';
+    ctx.lineWidth = (st[2]*(1+lift*1.5))*Math.max(.72,S);
     ctx.beginPath();
     ctx.moveTo(a.x,a.y);
-    if(l.t==='cross'){ const c = ctl(a,b); ctx.quadraticCurveTo(c[0],c[1],b.x,b.y); }
-    else ctx.lineTo(b.x,b.y);
+    if(l.t==='cross'){
+      const c = ctl(a,b); ctx.quadraticCurveTo(c[0],c[1],b.x,b.y);
+    } else ctx.lineTo(b.x,b.y);
     ctx.stroke();
   }
 
@@ -965,13 +419,27 @@ function frame(now){
     if(PULSE.t > -PULSE.trail){
       ctx.globalCompositeOperation='lighter';
       ctx.lineCap='round'; ctx.lineJoin='round';
+      const STEP = PULSE.trail/PULSE.seg;
       for(const p of CROSS){
         const a=N[p.l.a], b=N[p.l.b], c=ctl(a,b);
         const f = Math.min(a.f,b.f)*Math.min(a.iv,b.iv);
         if(f < .05) continue;
         const at = u => { const iu=1-u;
           return [iu*iu*a.x + 2*iu*u*c[0] + u*u*b.x, iu*iu*a.y + 2*iu*u*c[1] + u*u*b.y]; };
-        trail(at, PULSE.t, PULSE.trail, PULSE.seg, 1.5, CORE_W, HALO_B, f*0.84);
+        // soft halo, then the bright core — both as continuous tapering strokes
+        for(let pass=0; pass<2; pass++){
+          for(let i=0;i<PULSE.seg;i++){
+            const u1 = PULSE.t - i*STEP, u0 = u1 - STEP;
+            if(u1 <= 0 || u0 >= 1) continue;
+            const q0 = at(Math.max(0,u0)), q1 = at(Math.min(1,u1));
+            const k = 1 - i/PULSE.seg;                  // 1 at the head, 0 at the tail
+            const e = k*k*(3-2*k);                      // smoothstep taper
+            ctx.strokeStyle = pass ? 'rgba(255,255,255,'+(0.55*e*f).toFixed(3)+')'
+                                   : 'rgba(180,210,255,'+(0.10*e*f).toFixed(3)+')';
+            ctx.lineWidth = (pass ? 1.5*e + .45 : 5.0*e + 1.2)*Math.max(.8,S);
+            ctx.beginPath(); ctx.moveTo(q0[0],q0[1]); ctx.lineTo(q1[0],q1[1]); ctx.stroke();
+          }
+        }
       }
       ctx.globalCompositeOperation='source-over';
     }
@@ -982,41 +450,25 @@ function frame(now){
   for(const n of N){
     const g = GLOW[n.k]; if(!g) continue;
     const base = n.r*2.0*S;
-    const k = (base*2.6) * (1 + n.h*1.15 + n.p*.24 + n.se*1.5 + n.hp*.6);
-    const a = (0.36 + n.h*.75 + n.p*.30 + n.se*.95 + n.hp*.5) * n.f * n.iv;
+    const k = (base*2.6) * (1 + n.h*1.15 + n.p*.24);
+    const a = (0.36 + n.h*.75 + n.p*.30) * n.f * n.iv;
     ctx.globalAlpha = Math.min(1,a);
     ctx.drawImage(g, n.x-k, n.y-k, k*2, k*2);
-    if(n.se > .05 && WHITEGLOW){
-      const w2 = base*3.4*(1+n.se);
-      ctx.globalAlpha = Math.min(1, n.se*.8)*n.f;
-      ctx.drawImage(WHITEGLOW, n.x-w2, n.y-w2, w2*2, w2*2);
-    }
   }
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation='source-over';
 
-  /* shapes — same trick: one path per kind for everything at rest */
-  const SW2 = Math.max(.8,S);
-  for(const kk in KIND){
-    if(kk==='label' || kk==='user') continue;
-    const list = KIND[kk];
-    ctx.beginPath();
-    let any = false;
-    HOT.length = 0;
-    for(let i=0;i<list.length;i++){
-      const n = N[list[i]];
-      if(n.h+n.p+n.se+n.hp > .004 || n.f<.995 || n.iv<.995){ HOT.push(n); continue; }
-      path(n, n.r*2.0*S); any = true;
-    }
-    if(any){
-      ctx.strokeStyle = hexa(PAL[kk], 0.72);
-      ctx.fillStyle   = hexa(PAL[kk], 0.72*.16);
-      ctx.lineWidth   = Math.max(.8, (kk==='entity'||kk==='know' ? 1.05 : 1.45)*SW2);
-      ctx.fill(); ctx.stroke();
-    }
-    for(const n of HOT) drawNode(n, SW2);
+  /* shapes */
+  for(const n of N){
+    if(n.k==='label') continue;
+    const s = (1 + n.h*.55 + n.p*.13) * (0.35 + 0.65*n.iv);
+    const r = n.r*2.0*S*s;
+    const a = (0.72 + n.h*.28) * n.f * n.iv;
+    ctx.strokeStyle = hexa(PAL[n.k], a);
+    ctx.fillStyle   = hexa(PAL[n.k], a*.16);
+    ctx.lineWidth   = Math.max(.8, (n.k==='entity'||n.k==='know' ? 1.05 : 1.45)*Math.max(.8,S)*(1+n.h*.35));
+    shape(n,r);
   }
-  if(USER>=0) drawNode(N[USER], SW2);
 
   /* the owner keeps breathing out faint rings */
   if(!REDUCED && USER>=0){
@@ -1045,13 +497,13 @@ function frame(now){
     const bw = tw + FS*1.6, bh = FS*1.95;
     const cy = n.k==='user' ? n.y + n.r*2.0*S + bh*.95 : n.y;
     if(n.k==='label'){ n.bw = bw; n.bh = bh; }
-    const a = n.iv * (0.62 + n.h*.38 + n.se*.38);
+    const a = n.iv * (n.k==='user' ? 1 : 1) * (0.62 + n.h*.38);
     ctx.beginPath(); rrect(n.x-bw/2, cy-bh/2, bw, bh, 1.5);
     ctx.fillStyle = 'rgba(2,3,6,'+(0.78*n.iv).toFixed(3)+')'; ctx.fill();
     ctx.strokeStyle = 'rgba(255,255,255,'+(a*.13).toFixed(3)+')';
     ctx.lineWidth = Math.max(2.2, 3.4*Math.max(.85,S)); ctx.stroke();
-    ctx.strokeStyle = 'rgba(255,255,255,'+Math.min(1,(a*(n.k==='user'?.8:1))).toFixed(3)+')';
-    ctx.lineWidth = Math.max(.7, 1.05*Math.max(.85,S)*(1+n.se));
+    ctx.strokeStyle = 'rgba(255,255,255,'+(a*(n.k==='user'?.8:1)).toFixed(3)+')';
+    ctx.lineWidth = Math.max(.7, 1.05*Math.max(.85,S));
     ctx.stroke();
     ctx.fillStyle = 'rgba(255,255,255,'+(n.iv*(0.82+n.h*.18)).toFixed(3)+')';
     ctx.fillText(n.w, n.x + FS*.055, cy + FS*.06);
@@ -1084,20 +536,7 @@ function frame(now){
     ctx.restore();
   }
 
-  /* search-visited markers */
-  for(const n of N){
-    if(n.se < .12) continue;
-    const r = n.r*2.0*S*1.9 + 10*Math.max(.7,S);
-    ctx.save(); ctx.translate(n.x,n.y); ctx.rotate(-t*.6);
-    ctx.strokeStyle = 'rgba(255,255,255,'+(0.5*n.se).toFixed(3)+')';
-    ctx.lineWidth = Math.max(.7,S*.9);
-    ctx.setLineDash([3.2*Math.max(.8,S), 4.4*Math.max(.8,S)]);
-    ctx.beginPath(); ctx.arc(0,0,r,0,6.2832); ctx.stroke();
-    ctx.setLineDash([]); ctx.restore();
-  }
-
-  drawSearch(t);
-  drawDisc(dt);
+  /* card + leader line */
   updateCard(t);
 
   requestAnimationFrame(frame);
@@ -1110,38 +549,32 @@ function ctl(a,b){
   return [mx2*0.45+gx*0.55, my2*0.72+gy*0.28];
 }
 
-/* path only — appended to whatever path is currently open, so many nodes
-   can share a single fill/stroke pair */
-function path(n,r){
-  const x=n.x, y=n.y;
+function shape(n,r){
+  const {x,y}=n;
+  ctx.beginPath();
   if(n.k==='emotion' || n.k==='prefer'){
-    rrect(x-r,y-r,r*2,r*2, Math.min(r*.42, 3.2*S));
+    const rr = Math.min(r*.42, 3.2*S);
+    rrect(x-r,y-r,r*2,r*2,rr);
   } else if(n.k==='exper'){
     const h=r*1.12;
     ctx.moveTo(x, y-h); ctx.lineTo(x+r*1.02, y+h*.72); ctx.lineTo(x-r*1.02, y+h*.72); ctx.closePath();
-  } else {
-    ctx.moveTo(x+r,y); ctx.arc(x,y,r,0,6.2832);
-  }
-}
-function drawNode(n, SW2){
-  const sc = (1 + n.h*.55 + n.p*.13 + n.se*.5 + n.hp*.22) * (0.35 + 0.65*n.iv);
-  const r  = n.r*2.0*S*sc;
-  const a  = (0.72 + n.h*.28) * n.f * n.iv;
-  ctx.strokeStyle = n.se>.04 ? 'rgba(255,255,255,'+Math.min(1,a+n.se*.5).toFixed(3)+')'
-                             : hexa(PAL[n.k], a);
-  ctx.fillStyle   = hexa(PAL[n.k], a*.16 + n.se*.22);
-  ctx.lineWidth   = Math.max(.8, (n.k==='entity'||n.k==='know' ? 1.05 : 1.45)*SW2*(1+n.h*.35+n.se*.6));
-  if(n.k==='user'){
+  } else if(n.k==='user'){
     const col = PAL.user;
-    ctx.beginPath(); ctx.arc(n.x,n.y,r,0,6.2832);
+    ctx.arc(x,y,r,0,6.2832);
     ctx.fillStyle = hexa(col,.20); ctx.fill(); ctx.stroke();
-    ctx.beginPath(); ctx.arc(n.x,n.y,r*.63,0,6.2832);
+    ctx.beginPath(); ctx.arc(x,y,r*.63,0,6.2832);
     ctx.strokeStyle = hexa(col,.55*(0.72+n.h*.28)); ctx.stroke();
-    ctx.beginPath(); ctx.arc(n.x,n.y,Math.max(1.6,r*.14),0,6.2832);
+    ctx.beginPath(); ctx.arc(x,y,Math.max(1.6,r*.14),0,6.2832);
     ctx.fillStyle = hexa(col,.95); ctx.fill();
     return;
+  } else {
+    ctx.arc(x,y,r,0,6.2832);
   }
-  ctx.beginPath(); path(n,r); ctx.fill(); ctx.stroke();
+  ctx.fill(); ctx.stroke();
+  if(n.k==='hub'||n.k==='core'){
+    ctx.beginPath(); ctx.arc(x,y,Math.max(1,r*.22),0,6.2832);
+    ctx.fillStyle = hexa(PAL[n.k],.9); ctx.fill();
+  }
 }
 function rrect(x,y,w,h,r){
   ctx.moveTo(x+r,y);
@@ -1162,14 +595,16 @@ function updateCard(t){
       cSrc.textContent = n.k==='label' ? ('cluster · '+n.cnt+' items')
                        : (s.endsWith('00:') ? s+String(10+n.id%49).padStart(2,'0') : s);
     }
-    if(sel!==cardMeasured){ cardMeasured = sel; cardW = card.offsetWidth; cardH = card.offsetHeight; }
-    const w = cardW, h = cardH;
+    const w = card.offsetWidth, h = card.offsetHeight;
     const gap = 34*Math.max(.8,S);
+    // push the card outward, into the dark margin beside the cortex
     cardSide = (n.x < CX) ? -1 : 1;
     let tx = n.x + (cardSide>0 ? gap : -gap-w);
     let ty = n.y - h/2;
-    tx = Math.min(Math.max(tx, 10), Math.max(10, W-w-10));
-    ty = Math.min(Math.max(ty, 10), Math.max(10, H-h-10));
+    const off = stage.getBoundingClientRect();
+    const lo = -off.left + 10, hi = window.innerWidth - off.left - w - 10;
+    tx = Math.min(Math.max(tx, lo), Math.max(lo, hi));
+    ty = Math.min(Math.max(ty, -off.top + 10), window.innerHeight - off.top - h - 10);
     cardTX = tx; cardTY = ty;
     if(!cardShown){ cardX=tx; cardY=ty; cardShown=true; card.classList.add('on'); }
   } else if(cardShown){
@@ -1179,10 +614,10 @@ function updateCard(t){
   if(cardShown){
     cardX += (cardTX-cardX)*.22;
     cardY += (cardTY-cardY)*.22;
-    card.style.transform = 'translate3d('+cardX.toFixed(1)+'px,'+cardY.toFixed(1)+'px,0)';
+    card.style.transform = 'translate3d('+cardX.toFixed(1)+'px,'+cardY.toFixed(1)+'px,0) scale(1)';
     const n = N[sel];
-    const ax = cardSide>0 ? cardX : cardX+cardW;
-    const ay = cardY + cardH/2;
+    const ax = cardSide>0 ? cardX : cardX+card.offsetWidth;
+    const ay = cardY + card.offsetHeight/2;
     ctx.strokeStyle = 'rgba(255,255,255,'+(0.5*n.h).toFixed(3)+')';
     ctx.lineWidth = Math.max(.7,S*.85);
     ctx.beginPath();
@@ -1195,12 +630,6 @@ function updateCard(t){
     ctx.fill();
   }
 }
-
-document.getElementById('btn-explore').addEventListener('click', e=>{
-  e.preventDefault();
-  if(SR.st!=='idle'){ SR.st='idle'; }
-  SR.cool = 0; startSearch();
-});
 
 resize();
 requestAnimationFrame(frame);
