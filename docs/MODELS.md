@@ -21,13 +21,13 @@ VoiceMem 每个能力都是**可插拔**的:有内置默认,一行 config 就在
 |---|---|---|---|---|
 | 流式 ASR | `sherpa`(内置) | ✅ | 🟢 Apache | `sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20`（k2-fsa） |
 | 流式 ASR | **外部**（`feed_partial`） | — | 任意 | FunASR / Whisper / 云 ASR —— 换 ASR 只改喂进来的一行 |
+| ASR（非流式精转写） | `sensevoice` | ⚪ | 🟢 | `FunAudioLLM/SenseVoiceSmall`（锁定一轮时比流式更准） |
 | VAD | `silero`(内置) | ✅ | 🟢 MIT | `silero_vad.onnx` |
 | 声纹 | `3d-speaker`(内置) | ✅ | 🟢 Apache | `3dspeaker_...eres2net...16k.onnx` |
 | 声学场景 | `ast` | ✅ | 🟢 | `MIT/ast-finetuned-audioset-10-10-0.4593`（HF 自动下） |
 | 声学场景 | `clap` | ⚪ | 🟢 | laion `630k-audioset-best.pt`（`VOICEMEM_CLAP_CHECKPOINT`） |
 | 情绪 | 声学启发式(内置) | ✅ | 🟢 无模型 | RMS/ZCR，直接算，不下载 |
 | 情绪(多模态) | `qwen-omni` | ⚪ | 🟢 | `Qwen/Qwen2.5-Omni-3B` |
-| 精转写(非流式) | `sensevoice` | ⚪ | 🟢 | `FunAudioLLM/SenseVoiceSmall` |
 
 ---
 
