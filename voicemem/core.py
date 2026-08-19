@@ -52,6 +52,25 @@ class VoiceMem:
         self.left_brain = self._o._left      # 真组件
         self.right_brain = self._o._right
 
+    @classmethod
+    def from_config(cls, config: dict) -> "VoiceMem":
+        """声明式构造：一个统一 config dict 配齐所有本地/api 模型（仿 mem0）。
+
+        每个组件写成 ``{"provider": ..., "config": {...}}``，打开一个 dict 就知道
+        每个模型走本地还是 api。这是在现有 ``VoiceMem(embedding=fn, schema=fn, …)``
+        注入机制之上的一层糖，现有构造方式照常工作。provider 映射表见
+        ``voicemem.config``。::
+
+            vm = VoiceMem.from_config({
+                "mode": "multi_modal",
+                "embedding": {"provider": "local"},   # 记忆向量走本地 E5
+                "slots":     {"provider": "local"},   # slot 分类走本地 E5（0 LLM）
+                "llm": {"provider": "openai", "config": {"model": "gpt-4o-mini"}},
+            })
+        """
+        from voicemem.config import build_kwargs
+        return cls(**build_kwargs(config))
+
     # ── 面向用户的便捷方法（各自一行委托给 Orchestrator）─────────────────────────
 
     def ingest(self, text, audio=None, **kw): return self._o.Ingest(text, audio_path=audio, **kw)
