@@ -169,9 +169,9 @@ class TextEmotionFallbackTests(unittest.TestCase):
     """
 
     def setUp(self):
-        from voicemem import VoiceMem
+        from voicemem.orchestrator import Orchestrator
         self.tmp = Path(tempfile.mkdtemp())
-        self.vm = VoiceMem(memory_root=self.tmp, user_id="u1")
+        self.vm = Orchestrator(memory_root=self.tmp, user_id="u1")
         self.fake_rb_repo = MagicMock()
         self.fake_rb_repo._store.upsert_memory.return_value = MagicMock(id="rb1")
         self.vm._cache["rb_repo"] = self.fake_rb_repo
@@ -269,9 +269,9 @@ class CleanupSupersedeTests(unittest.TestCase):
     """_run_cleanup：矛盾 → 标记 supersede 保留；重复 → 删除。"""
 
     def setUp(self):
-        from voicemem import VoiceMem
+        from voicemem.orchestrator import Orchestrator
         self.tmp = Path(tempfile.mkdtemp())
-        self.vm = VoiceMem(memory_root=self.tmp, user_id="u1")
+        self.vm = Orchestrator(memory_root=self.tmp, user_id="u1")
         self.rb_store = self.vm._get_rb_repo()._store
 
     def tearDown(self):

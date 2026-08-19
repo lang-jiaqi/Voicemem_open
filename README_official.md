@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/images/logo.jpg" alt="VoiceMem Logo" width="100%">
+  <img src="assets/Voicemem_logo.png" alt="VoiceMem Logo" width="100%">
 </p>
 
 ---

@@ -21,7 +21,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from voicemem import VoiceMem
+from voicemem.orchestrator import Orchestrator
 from voicemem.utils.common.voice_input import VoiceIngestResult
 
 
@@ -41,7 +41,7 @@ def _ctx(**overrides) -> dict:
 class HeartnotePureEmotionTests(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        self.vm = VoiceMem(memory_root=self.tmp, user_id="u1")
+        self.vm = Orchestrator(memory_root=self.tmp, user_id="u1")
         self.fake_rb_repo = MagicMock()
         self.fake_rb_repo._store.upsert_memory.return_value = MagicMock(id="rb_mem_1")
         self.vm._cache["rb_repo"] = self.fake_rb_repo
