@@ -989,7 +989,11 @@ window.brainAdd = function(side, kind, label, slot){
      memory_hits{left_brain,right_brain_hits,current_scene} / answer_start|delta|done
      + 二进制 24kHz PCM16 回复音频；麦克风上行也是 24kHz PCM16 mono。
      后端地址默认 ws://<本机>:8787/ws，可用 ?ws=host:port 覆盖。 */
-  const SAMPLE_RATE = 24000, PREBUFFER = 0.08;   // realtime 音频稳，用最小预缓冲开口最快（卡就回调 0.12~0.2）
+  const SAMPLE_RATE = 24000;
+  // 预缓冲按模式分：realtime 是 WebSocket 推的稳定流，0.08 开口最快；llm_tts 走
+  // TTS 的 HTTP 流，块到达抖动大得多，缓冲太小时前几秒会一顿一顿（排上的块播完了
+  // 下一块还没到），等积压攒够才顺——就是「前期卡、中后期恢复」那个现象。
+  let PREBUFFER = 0.25;
   const params = new URLSearchParams(location.search);
   const WS_HOST = params.get('ws') || ((location.hostname || 'localhost') + ':8787');
   const WS_URL = (location.protocol==='https:'?'wss://':'ws://') + WS_HOST + '/ws';
@@ -1061,6 +1065,7 @@ window.brainAdd = function(side, kind, label, slot){
   function handle(msg){
     console.log('[voice] <<', msg.type, msg.text!==undefined?JSON.stringify(msg.text).slice(0,40):'');
     switch(msg.type){
+      case 'session_ready': PREBUFFER = msg.mode === 'realtime' ? 0.08 : 0.25; break;
       case 'speech_tentative': setVoiceState('user'); if(playCtx&&playCtx.state==='running')playCtx.suspend(); break;
       case 'partial_transcript': setVoiceState('user'); window.vm.setInput(msg.replace? msg.text : ($('liveInput').textContent.replace('…','')+msg.text)); break;
       case 'user_transcript':

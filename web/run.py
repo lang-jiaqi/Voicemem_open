@@ -20,6 +20,7 @@
 记忆库的，维度不兼容——先清掉记忆目录再跑。
 """
 import argparse
+import asyncio
 import base64
 import json
 import os
@@ -109,22 +110,49 @@ class Pending:
 
 # ══════════════════ 两条控制流（各 ~10 行，只消费预取好的 Pending）══════════════════
 
+_SENT_END = "。！？!?…\n"          # 断句点：到这儿就够合成一段了
+_SENT_MIN = 12                     # 太短的碎片不单独合成——每次 TTS 都要吃一次首帧延迟
+
+
 async def voicemem_llm_tts(pending, send, send_audio):
-    """记忆已在关键路径外预取好：LLM 流式回复 → TTS 流式语音。"""
+    """记忆已在关键路径外预取好：LLM 流式回复 → TTS 流式语音。
+
+    TTS 跟生成**并行**：LLM 吐满一句就丢进队列，另一条协程取出来合成、发音频。
+    等全文生成完再开始合成的话，文本早打完了、音频还没起头（实测 TTS 首帧就要
+    ~1.2s，加上生成那几秒，用户看着字干等）。
+    """
     await send({"type": "user_transcript", "text": pending.text})
     await send({"type": "memory_hits", **utils.hits_payload(pending.result)})
     await send({"type": "answer_start"})
-    reply = ""
-    async for d in utils.llm_stream(pending.text, pending.memory_context, REPLY):
-        reply += d
-        await send({"type": "answer_delta", "text": d})
+
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def speak():
+        while (seg := await queue.get()) is not None:
+            async for pcm in utils.tts_stream(seg, REPLY):
+                await send_audio(pcm)
+
+    speaker = asyncio.create_task(speak())
+    reply, buf = "", ""
+    try:
+        async for d in utils.llm_stream(pending.text, pending.memory_context, REPLY):
+            reply += d
+            buf += d
+            await send({"type": "answer_delta", "text": d})
+            if buf.rstrip().endswith(tuple(_SENT_END)) and len(buf.strip()) >= _SENT_MIN:
+                await queue.put(buf.strip())
+                buf = ""
+        if buf.strip():
+            await queue.put(buf.strip())
+    finally:
+        await queue.put(None)                   # 生成出错也要让 speak() 收工
+
     await send({"type": "answer_done"})
-    # 先落记忆再放语音：ingest 排在 send_audio 后面的话，用户一听完就关页面
-    # （语音场景很常见），send_audio 抛 WebSocketDisconnect，这一轮就永远存不进去。
+    # 先落记忆再等放完：ingest 排在音频后面的话，用户一听完就关页面（语音场景很
+    # 常见），send_audio 抛 WebSocketDisconnect，这一轮就永远存不进去。
     # async_facts=True：抽事实走后台，不堵住读麦克风那条线。
     vm.ingest(pending.text, agent_reply=reply, async_facts=True)   # 两半一起存
-    async for pcm in utils.tts_stream(reply, REPLY):
-        await send_audio(pcm)
+    await speaker
 
 
 async def voicemem_realtime(pending, conn, send, send_audio):
