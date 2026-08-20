@@ -10,7 +10,7 @@
     "dropout": 0.05,
     "bias": "none",
     "task_type": "CAUSAL_LM",
-    "target_modules_pattern": "model.language_model.*.(shared_expert_gate|down_proj|out_proj|in_proj_a|in_proj_b|q_proj|in_proj_z|gate_proj|up_proj|in_proj_qkv|k_proj|v_proj|o_proj)"
+    "target_modules": "^(model\\.language_model(?=\\.).*\\.(shared_expert_gate|down_proj|out_proj|in_proj_a|in_proj_b|q_proj|in_proj_z|gate_proj|up_proj|in_proj_qkv|k_proj|v_proj|o_proj))$"
   },
   "training": {
     "epochs": 2,
@@ -26,7 +26,10 @@
     "max_sequence_length": 2048,
     "optimizer": "adamw_torch_fused",
     "weight_decay": 0.1,
-    "adam_beta": [0.9, 0.95]
+    "adam_beta": [
+      0.9,
+      0.95
+    ]
   },
   "data": {
     "format": "multi-turn SFT JSONL",
