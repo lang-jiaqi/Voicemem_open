@@ -25,7 +25,11 @@ out/
 *.pth
 *.safetensors
 *.bin
-models/sherpa-onnx-*/
+# 按用途分的模型目录（连同 tokens.txt / test_wavs 这些随包资产一起）；
+# models/ 下只有 voicemem-qwen3.6-*/ 那份发布清单该进仓库
+models/vad/
+models/asr/
+models/speaker/
 
 # 本地演示分叉与个人种子脚本
 demo_local/
