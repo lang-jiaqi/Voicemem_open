@@ -181,8 +181,13 @@ async def voicemem_llm_tts(pending, send, send_audio):
     await speaker
 
 
-async def voicemem_realtime(pending, conn, send, send_audio):
-    """记忆已预取好：注入为 Realtime 指令 → 触发原生语音（音频早已平行进缓冲）。"""
+async def start_realtime_turn(pending, conn, send):
+    """把预取好的记忆注入 Realtime session，触发这一轮的原生语音。
+
+    只负责"发起"；收音频/文本和收尾都在常驻的事件泵里（见 realtime_session）——
+    OpenAI 的事件流只能有一个消费者，每轮各读各的会串台：上一轮被打断后残留的
+    response.done 会被下一轮读到，当成自己说完了。
+    """
     await send({"type": "user_transcript", "text": pending.text})
     await send({"type": "memory_hits", **utils.hits_payload(pending.result)})
     await conn.session.update(session={"type": "realtime", "turn_detection": None,
@@ -194,16 +199,6 @@ async def voicemem_realtime(pending, conn, send, send_audio):
                                                   "content": [{"type": "input_text", "text": pending.text}]})
     await conn.response.create()
     await send({"type": "answer_start"})
-    reply = ""                                            # 原生语音也有转写，攒起来一起存
-    async for ev in conn:
-        t = getattr(ev, "type", "")
-        if t.endswith("output_audio.delta"):               await send_audio(base64.b64decode(ev.delta))
-        elif t.endswith("output_audio_transcript.delta"):
-            reply += ev.delta
-            await send({"type": "answer_delta", "text": ev.delta})
-        elif t.endswith("response.done"):                  break
-    await send({"type": "answer_done"})
-    vm.ingest(pending.text, agent_reply=reply, async_facts=True)   # 两半一起存，抽事实走后台
 
 
 async def _no_realtime(sock, err):
@@ -223,9 +218,10 @@ async def _no_realtime(sock, err):
 # 全在核心 VoiceStream 里。这里只做 demo 该做的：搬 socket 帧、发 partial、把说完
 # 的一轮包成 Pending 交给控制流——demo 就是核心的使用示例，不再平行重写一套。
 
-async def anticipate(sock, on_frame=None):
+async def anticipate(sock, on_frame=None, on_speech=None):
     """驱动核心流式会话，逐个 yield 确认回合的 Pending。
-    on_frame(raw24k)：realtime 用它把原始音频平行喂给 OpenAI（方案 A）。"""
+    on_frame(raw24k)：realtime 用它把原始音频平行喂给 OpenAI（方案 A）。
+    on_speech()：本地 VAD 一听到人声就叫一次——realtime 拿它做打断（barge-in）。"""
     stream = vm.stream(spec_min_chars=SPEC_MIN_CHARS, gamble_s=GAMBLE_S, confirm_s=CONFIRM_S)
     last_partial = ""
     while True:
@@ -244,6 +240,8 @@ async def anticipate(sock, on_frame=None):
         if on_frame:
             await on_frame(raw)                               # 方案 A：音频也进 OpenAI 缓冲
         st = await stream.feed(raw)                           # 核心：ASR + VAD + 投机预取
+        if st.state == "<speak>" and on_speech:
+            await on_speech()                                 # 助手还在说 → 打断它
         if st.text.strip() and st.text != last_partial:
             last_partial = st.text
             await sock.send_json({"type": "partial_transcript", "text": st.text, "replace": True})
@@ -270,11 +268,58 @@ async def realtime_session(sock):
             await conn.session.update(session={"type": "realtime", "turn_detection": None})
             connected = True
 
+            # 这一轮的状态：谁在说、说了什么、这轮用户的输入是什么
+            turn = {"live": False, "reply": "", "pending": None}
+
+            def close_turn():
+                """一轮结束（说完或被打断）：把两半对话一起存。被打断时存的是用户
+                真正听到的那部分——跟 llm_tts 那边 capture() 的取舍一致。"""
+                p, reply = turn["pending"], turn["reply"]
+                turn.update(live=False, reply="", pending=None)
+                if p is not None:
+                    vm.ingest(p.text, agent_reply=reply, async_facts=True)
+
+            async def pump():
+                """常驻事件泵：OpenAI 的事件流只有这一个消费者。
+
+                turn["live"] 为假时一律不往前端转发——被打断后 OpenAI 还会吐一会儿
+                残余音频，转过去的话前端刚 stopPlayback 又排上新的，打断就不干净了。
+                """
+                async for ev in conn:
+                    t = getattr(ev, "type", "")
+                    if t.endswith("output_audio.delta"):
+                        if turn["live"]:
+                            await sock.send_bytes(base64.b64decode(ev.delta))
+                    elif t.endswith("output_audio_transcript.delta"):
+                        if turn["live"]:
+                            turn["reply"] += ev.delta
+                            await sock.send_json({"type": "answer_delta", "text": ev.delta})
+                    elif t.endswith("response.done") or t.endswith("response.cancelled"):
+                        if turn["live"]:
+                            await sock.send_json({"type": "answer_done"})
+                            close_turn()
+
             async def on_frame(raw):
                 await conn.input_audio_buffer.append(audio=base64.b64encode(raw).decode())
 
-            async for pending in anticipate(sock, on_frame=on_frame):
-                await voicemem_realtime(pending, conn, sock.send_json, sock.send_bytes)
+            async def on_speech():
+                """用户在助手说话时开口 → 打断。幂等：live 一置 False 就不再触发。"""
+                if not turn["live"]:
+                    return
+                turn["live"] = False
+                await conn.response.cancel()
+                await sock.send_json({"type": "answer_interrupt"})   # 前端停播已排队的音频
+                close_turn()
+
+            pump_task = asyncio.create_task(pump())
+            try:
+                async for pending in anticipate(sock, on_frame=on_frame, on_speech=on_speech):
+                    if turn["live"]:                     # 上一轮还没说完就被新的一轮顶掉
+                        await on_speech()
+                    turn.update(live=True, reply="", pending=pending)
+                    await start_realtime_turn(pending, conn, sock.send_json)
+            finally:
+                pump_task.cancel()
     except Exception as e:
         if connected:
             raise
