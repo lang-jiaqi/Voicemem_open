@@ -110,8 +110,25 @@ class Pending:
 
 # ══════════════════ 两条控制流（各 ~10 行，只消费预取好的 Pending）══════════════════
 
-_SENT_END = "。！？!?…\n"          # 断句点：到这儿就够合成一段了
-_SENT_MIN = 12                     # 太短的碎片不单独合成——每次 TTS 都要吃一次首帧延迟
+# 怎么切给 TTS 的段，决定了多久能出第一声。实测 gpt-4o-mini-tts 的首帧延迟随文本
+# 长度涨：8字 615ms / 25字 902ms / 100字 1318ms——所以**第一段要尽量短**（早出声），
+# 后面的段可以长（少调几次、语气连贯）。
+_SENT_END  = "。！？!?…\n"          # 句末：正常的切段点
+_SOFT_END  = "，,、；;：: "          # 句中停顿：只有第一段用，为了抢出第一声
+_FIRST_MIN = 6                      # 第一段攒够这么多字，遇到任何停顿就发
+_FIRST_MAX = 20                     # 一个停顿都没有时，第一段也不能再等了
+_SENT_MIN  = 12                     # 后续段的最短长度
+_SENT_MAX  = 60                     # 后续段的兜底：LLM 一口气不换气也得切
+
+
+def _cut_point(buf: str, first: bool) -> bool:
+    """这段够不够发去合成了。"""
+    s = buf.strip()
+    if not s:
+        return False
+    if first:                                  # 抢第一声：逗号也算，实在没有就按长度切
+        return (len(s) >= _FIRST_MIN and s[-1] in _SENT_END + _SOFT_END) or len(s) >= _FIRST_MAX
+    return (len(s) >= _SENT_MIN and s[-1] in _SENT_END) or len(s) >= _SENT_MAX
 
 
 async def voicemem_llm_tts(pending, send, send_audio):
@@ -137,15 +154,15 @@ async def voicemem_llm_tts(pending, send, send_audio):
                 break
 
     speaker = asyncio.create_task(speak())
-    reply, buf = "", ""
+    reply, buf, sent = "", "", 0
     try:
         async for d in utils.llm_stream(pending.text, pending.memory_context, REPLY):
             reply += d
             buf += d
             await send({"type": "answer_delta", "text": d})
-            if buf.rstrip().endswith(tuple(_SENT_END)) and len(buf.strip()) >= _SENT_MIN:
+            if _cut_point(buf, first=sent == 0):
                 await queue.put(buf.strip())
-                buf = ""
+                buf, sent = "", sent + 1
         if buf.strip():
             await queue.put(buf.strip())
     finally:
