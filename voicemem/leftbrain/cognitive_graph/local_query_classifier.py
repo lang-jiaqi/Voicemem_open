@@ -29,7 +29,13 @@ import numpy as np
 
 from voicemem.leftbrain.cognitive_graph.query_slot_classifier import QueryClassification
 
-_MODEL_NAME = "intfloat/multilingual-e5-small"
+# 跟记忆向量共用同一份 E5（models/embedding/），省一份权重
+def _model_name() -> str:
+    from voicemem.utils.common.paths import hf_model
+    return hf_model("embedding", "intfloat/multilingual-e5-small", "VOICEMEM_E5_MODEL")
+
+
+_MODEL_NAME = _model_name()
 
 # 和内置 LLM 分类器同一套 base-7 槽描述（故意保持一致，是同一个分类决策的本地近似）。
 _SLOT_DESCRIPTIONS = {

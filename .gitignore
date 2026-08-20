@@ -30,6 +30,11 @@ out/
 models/vad/
 models/asr/
 models/speaker/
+models/embedding/
+models/scene/
+models/emotion/
+models/tts/
+models/slm/
 
 # 本地演示分叉与个人种子脚本
 demo_local/

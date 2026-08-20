@@ -1,39 +1,55 @@
 #!/usr/bin/env bash
-# 下载 voicemem 用到的**本地开源**语音模型（VAD / 流式 ASR / 声纹）。
-# 默认从打包好的 HF 仓库一次拉全，按用途分目录：
+# 下载 voicemem 用到的**本地模型**，按用途分目录：
 #
 #   models/
-#     vad/      silero_vad.onnx                                   判「说完了」
-#     asr/      sherpa-onnx-streaming-zipformer-bilingual-zh-en…  回退流式 ASR
-#     speaker/  3dspeaker_speech_eres2net_base_sv_zh-cn…onnx      声纹
+#     vad/        silero_vad.onnx                                  判「说完了」
+#     asr/        sherpa-onnx-streaming-zipformer-bilingual-zh-en… 回退流式 ASR
+#     speaker/    3dspeaker_speech_eres2net_base_sv_zh-cn…onnx     声纹
+#     embedding/  intfloat/multilingual-e5-small                   记忆向量 + slot 分类（共用一份）
+#     scene/      MIT/ast-finetuned-audioset-10-10-0.4593          声学场景
+#     emotion/    FunAudioLLM/SenseVoiceSmall                      情绪 + 精转写
+#     tts/        （可选）piper voice .onnx，只有 TTS_BACKEND=local 才要
 #
-# 回复模型不在这里（adapter 在 LangJiaqi77/Voicemem-Qwen3_6-35B-A3B-QLoRA-v2，
-# 基座另外取）；默认流式 ASR 是 FunASR paraformer，首次运行自动下，也不用管。
-# 完整模型清单见 docs/MODELS.md。
+# 下完这些整条链路不再需要网络（除了回复模型那次 API 调用）。不下也能跑——
+# 代码会回退到 HF id，首次用到时 transformers 自动拉。
+#
+# 不在这里的两样：
+#   · 回复模型 —— adapter 在 LangJiaqi77/Voicemem-Qwen3_6-35B-A3B-QLoRA-v2，基座另取
+#   · 微调的 Omni 情绪模型 —— zhifeixie/VoiceMem_SLM_Qwen25_omni，
+#     用 VOICEMEM_OMNI_MODEL 指过去（见下面 --slm）
 #
 # 用法（从仓库根目录）:
-#   bash scripts/download_models.sh [目标目录，默认 ./models]
-#   VOICEMEM_MODELS_REPO=别的仓库 bash scripts/download_models.sh
+#   bash scripts/download_models.sh                  # 拉 models/ 那一套
+#   bash scripts/download_models.sh /path/to/models  # 换目标目录
+#   bash scripts/download_models.sh --slm            # 额外拉微调的 Omni 模型
 #   VOICEMEM_FROM_UPSTREAM=1 bash scripts/download_models.sh   # 改从各家官方源逐个拉
 set -euo pipefail
 
-DEST="${1:-models}"
+DEST="models"
+WANT_SLM=0
+for arg in "$@"; do
+  case "$arg" in
+    --slm) WANT_SLM=1 ;;
+    *)     DEST="$arg" ;;
+  esac
+done
+
 REPO="${VOICEMEM_MODELS_REPO:-zhifeixie/VoiceMem_default}"
+SLM_REPO="${VOICEMEM_SLM_REPO:-zhifeixie/VoiceMem_SLM_Qwen25_omni}"
 mkdir -p "${DEST}"
 
 if [ "${VOICEMEM_FROM_UPSTREAM:-0}" != "1" ]; then
-  echo "[1/2] 从 ${REPO} 拉取 VAD / ASR / 声纹 …"
+  echo "[1/2] 从 ${REPO} 拉全套本地模型 …"
   python3 - "${REPO}" "${DEST}" <<'PY'
 import sys
 from huggingface_hub import snapshot_download
-repo, dest = sys.argv[1], sys.argv[2]
-snapshot_download(repo_id=repo, local_dir=dest)   # 断点续传，重复跑不会重下
+snapshot_download(repo_id=sys.argv[1], local_dir=sys.argv[2])   # 断点续传，重复跑不重下
 PY
 else
-  # 逐个从各家官方公开来源拉（HF 不可达、或想核对来源时用）
+  # 逐个从各家官方公开来源拉（HF 不可达、或想核对来源与许可时用）
   REL="https://github.com/k2-fsa/sherpa-onnx/releases/download"
   ASR_DIR="sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20"
-  mkdir -p "${DEST}/vad" "${DEST}/asr" "${DEST}/speaker"
+  mkdir -p "${DEST}"/{vad,asr,speaker,embedding,scene,emotion}
 
   echo "[1/2] 官方源：VAD silero（MIT）…"
   curl -L -o "${DEST}/vad/silero_vad.onnx" "${REL}/asr-models/silero_vad.onnx"
@@ -45,17 +61,32 @@ else
   echo "      官方源：声纹 3D-Speaker ERes2Net（Apache-2.0）…"
   curl -L -o "${DEST}/speaker/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx" \
     "${REL}/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
-fi
 
-# 本地记忆/投机用的 E5（intfloat/multilingual-e5-small，MIT）——预拉进 HF 缓存，离线可跑
-E5_REPO="${VOICEMEM_E5_REPO:-intfloat/multilingual-e5-small}"
-echo "[2/2] 本地 E5 ${E5_REPO} …"
-python3 - "${E5_REPO}" <<'PY'
+  echo "      官方源：embedding / scene / emotion（HF 各自原仓库）…"
+  python3 - "${DEST}" <<'PY'
 import sys
 from huggingface_hub import snapshot_download
-snapshot_download(repo_id=sys.argv[1])   # 默认缓存目录，断点续传
+dest = sys.argv[1]
+for kind, repo in [("embedding", "intfloat/multilingual-e5-small"),
+                   ("scene",     "MIT/ast-finetuned-audioset-10-10-0.4593"),
+                   ("emotion",   "FunAudioLLM/SenseVoiceSmall")]:
+    print(f"        {kind} ← {repo}")
+    snapshot_download(repo_id=repo, local_dir=f"{dest}/{kind}")
 PY
+fi
+
+if [ "${WANT_SLM}" = "1" ]; then
+  echo "[2/2] 微调的 Omni 情绪模型 ${SLM_REPO} …"
+  python3 - "${SLM_REPO}" "${DEST}" <<'PY'
+import sys
+from huggingface_hub import snapshot_download
+snapshot_download(repo_id=sys.argv[1], local_dir=f"{sys.argv[2]}/slm")
+PY
+  echo "      用它：export VOICEMEM_OMNI_MODEL=${DEST}/slm"
+else
+  echo "[2/2] 跳过微调的 Omni 模型（要的话加 --slm）"
+fi
 
 echo
-echo "完成：语音模型在 ${DEST}/（vad / asr / speaker），E5 在 HF 缓存。"
-echo "其余能力（AST 场景 / SenseVoice / Qwen-Omni）首次用时 transformers 自动下——见 docs/MODELS.md。"
+echo "完成：${DEST}/ 下按用途分好（vad / asr / speaker / embedding / scene / emotion）。"
+echo "代码会优先用这里的本地模型，没有的项自动回退到 HF 下载。"
