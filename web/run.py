@@ -4,12 +4,22 @@
 分类，注入的 LocalQueryClassifier，0 LLM 0 网络），VAD 在 500ms 确认说完时记忆早已算好，
 交给两条 ~10 行控制流的只剩「发 LLM / 发 Realtime」。说到一半停顿又续上（barge-in）→ 取消投机。
 
-跑：cd web && DEMO_MODE=llm_tts OPENAI_API_KEY=sk-... python run.py   # http://localhost:8787
-    （DEMO_MODE=realtime 切 realtime；需 Realtime API 权限）
+跑（参数见 ``--help``；每个都能用同名环境变量给默认值）::
+
+    export OPENAI_API_KEY=sk-...
+    python web/run.py \\
+      --mode llm_tts \\
+      --port 8787 \\
+      --spec_min_chars 6 \\
+      --gamble_ms 200 \\
+      --confirm_ms 500
+
+``--mode realtime`` 切 OpenAI Realtime 原生语音（需 Realtime API 权限）。
 
 注意：记忆向量用本地 384 维 E5（投机预算内不能走网络）。换过旧 demo（OpenAI 1536 维）留了
 记忆库的，维度不兼容——先清掉记忆目录再跑。
 """
+import argparse
 import base64
 import json
 import os
@@ -25,20 +35,49 @@ sys.path.insert(0, str(HERE))                       # 让 `import utils` 找到�
 sys.path.insert(0, str(_ROOT))
 os.environ.setdefault("VOICEMEM_MODELS_DIR", str(_ROOT / "models"))
 
+
+# ══════════════════ 命令行参数（同名环境变量给默认值，两种都行）══════════════════
+# 放在下面那两个重 import 之前：utils / voicemem 会拉起 torch + sentence-transformers，
+# 排在它们后面的话 `--help` 得先等模型库加载完。被 import 时不吃 sys.argv（传 []）。
+
+def _parse(argv):
+    p = argparse.ArgumentParser(description="voicemem web demo（脑图 + 0–500ms 投机预取）")
+    p.add_argument("--mode", choices=["llm_tts", "realtime"],
+                   default=os.environ.get("DEMO_MODE", "llm_tts"),
+                   help="回复控制流：llm_tts=LLM 流→TTS 流；realtime=OpenAI 原生语音")
+    p.add_argument("--host", default="0.0.0.0")
+    p.add_argument("--port", type=int, default=int(os.environ.get("VOICEMEM_PORT", 8787)))
+    p.add_argument("--spec_min_chars", type=int, default=6,
+                   help="partial 转写到几个字起投机预取")
+    p.add_argument("--gamble_ms", type=int, default=200,
+                   help="静音多久就赌你说完了，补投机一次")
+    p.add_argument("--confirm_ms", type=int, default=500,
+                   help="静音多久由 VAD 确认一轮结束，交出 Turn")
+    p.add_argument("--config", default=os.environ.get("VOICEMEM_CONFIG"),
+                   help="一个 .json，整体覆盖下面的 CONFIG")
+    p.add_argument("--memory_root", default=os.environ.get("VOICEMEM_MEMORY_ROOT"),
+                   help="记忆库目录")
+    return p.parse_args(argv)
+
+
+ARGS = _parse(None if __name__ == "__main__" else [])
+
 import utils                                         # noqa: E402  同目录管道层
 from voicemem import VoiceMem                        # noqa: E402
 
-MODE = os.environ.get("DEMO_MODE", "llm_tts")        # llm_tts | realtime
-SPEC_MIN_CHARS, GAMBLE_S, CONFIRM_S = 6, 0.20, 0.50  # partial 起投机 / 赌说完 / VAD 确认结束
+MODE = ARGS.mode                                     # llm_tts | realtime
+SPEC_MIN_CHARS = ARGS.spec_min_chars                 # partial 起投机
+GAMBLE_S  = ARGS.gamble_ms / 1000                    # 赌说完
+CONFIRM_S = ARGS.confirm_ms / 1000                   # VAD 确认结束
 
 # ══════════════════ 统一配置入口：一个 dict 配齐所有本地/api 模型 ══════════════════
 # 打开这个 dict 就知道每个模型走本地还是 api。记忆侧（embedding/slots）走本地 E5
 # → 整条 search 0 LLM、0 网络（实测 Search 本体 ~10ms）；reply 段（回复用的
 # llm/tts/realtime）也在这一处配，省得分散在各处 env。缺省项走内置默认。
-# 想外挂一份自定义 config：设 VOICEMEM_CONFIG 指向一个 .json 文件即可覆盖。
+# 想外挂一份自定义 config：--config path.json（或 VOICEMEM_CONFIG）整体覆盖。
 CONFIG = {
     "mode": "multi_modal",
-    "memory_root": os.environ.get("VOICEMEM_MEMORY_ROOT"),
+    "memory_root": ARGS.memory_root,
     "embedding": {"provider": "local"},              # 记忆向量走本地 E5（0 网络）
     "slots":     {"provider": "local"},              # slot 分类走本地 E5（0 LLM）
     # reply：回复用模型（核心不管，web 读）。默认全走 OpenAI api。
@@ -49,10 +88,9 @@ CONFIG = {
     },
 }
 
-# VOICEMEM_CONFIG 指向的 json 文件整体覆盖上面的 CONFIG（傻瓜清晰：一个文件配齐）。
-_cfg_path = os.environ.get("VOICEMEM_CONFIG")
-if _cfg_path:
-    CONFIG = json.loads(Path(_cfg_path).read_text(encoding="utf-8"))
+# --config / VOICEMEM_CONFIG 指向的 json 整体覆盖上面的 CONFIG（一个文件配齐）。
+if ARGS.config:
+    CONFIG = json.loads(Path(ARGS.config).read_text(encoding="utf-8"))
 
 REPLY = CONFIG.get("reply")                           # 传给 utils 的回复函数
 
@@ -164,6 +202,7 @@ app = utils.build_app(MODE, realtime_session if MODE == "realtime" else llm_tts_
 
 
 if __name__ == "__main__":
-    print(f"[web] mode={MODE} -> http://localhost:8787/")
+    print(f"[web] mode={MODE} spec≥{SPEC_MIN_CHARS}字 gamble={ARGS.gamble_ms}ms "
+          f"confirm={ARGS.confirm_ms}ms -> http://localhost:{ARGS.port}/", flush=True)
     vm.classify("你好")                                       # 预热本地 E5，第一轮就快
-    uvicorn.run(app, host="0.0.0.0", port=8787)
+    uvicorn.run(app, host=ARGS.host, port=ARGS.port)

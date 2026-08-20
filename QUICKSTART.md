@@ -19,10 +19,10 @@ bash scripts/download_models.sh models      # VAD/声纹/回退ASR（k2-fsa 官�
 ## 1. 启动（一个进程）
 
 ```bash
-cd web
 export OPENAI_API_KEY=sk-...
-DEMO_MODE=llm_tts python run.py             # http://localhost:8787
-# 想要更快更自然的原生语音： DEMO_MODE=realtime python run.py  （需 Realtime API 权限）
+python web/run.py                           # http://localhost:8787
+# 想要更快更自然的原生语音： python web/run.py --mode realtime  （需 Realtime API 权限）
+# 全部参数：python web/run.py --help
 ```
 
 ## 2. 用

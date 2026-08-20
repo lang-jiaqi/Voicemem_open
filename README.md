@@ -150,10 +150,10 @@ asyncio.run(main())
 ### 语音 Demo（脑图 + 0–500ms 投机预取）
 
 ```bash
-cd web && DEMO_MODE=llm_tts python run.py     # http://localhost:8787
-# 想要更自然的原生语音： DEMO_MODE=realtime python run.py  （需 Realtime API 权限）
+python web/run.py                             # http://localhost:8787
+python web/run.py --mode realtime             # 更自然的原生语音（需 Realtime API 权限）
 ```
-详见 [QUICKSTART.md](QUICKSTART.md)。
+参数见 [Demo](#demo)，详细步骤见 [QUICKSTART.md](QUICKSTART.md)。
 
 ## Architecture
 
@@ -243,11 +243,58 @@ ASR 还能整个换掉：`VOICEMEM_ASR=sherpa` 切回 sherpa-onnx，或用
 
 ## Demo
 
-**[`web/`](web/)**（`pip install -e ".[web]"`）—— 单一极简 demo：`run.py`（对话核心）+
-`utils.py`（管道）+ 脑图 `index.html`。
-本地 ASR + VAD 边听边算，VAD 确认说完时记忆早已在关键路径外投机预取好，两条回复控制流
-（`llm_tts` = GPT 流→TTS 流 / `realtime` = OpenAI Realtime 原生语音）拿去回复。WebSocket 协议见
+### 脑图 demo（浏览器）
+
+**[`web/`](web/)**（`pip install -e ".[web]"`）—— `run.py`（对话核心）+ `utils.py`（管道）
++ 脑图 `index.html`。本地 ASR + VAD 边听边算，VAD 确认说完时记忆早已在关键路径外预取好。
+
+```bash
+export OPENAI_API_KEY=sk-...
+python web/run.py \
+  --mode llm_tts \
+  --port 8787 \
+  --spec_min_chars 6 \
+  --gamble_ms 200 \
+  --confirm_ms 500
+```
+
+| 参数 | 干什么 | 默认 |
+|---|---|---|
+| `--mode` | `llm_tts` = LLM 流→TTS 流；`realtime` = OpenAI 原生语音 | `llm_tts` |
+| `--port` / `--host` | 服务端口 / 监听地址 | `8787` / `0.0.0.0` |
+| `--spec_min_chars` | partial 转写到几个字起投机预取 | `6` |
+| `--gamble_ms` | 静音多久就赌你说完了，补投机一次 | `200` |
+| `--confirm_ms` | 静音多久由 VAD 确认一轮结束，交出 `Turn` | `500` |
+| `--config` | 一个 `.json`，整体覆盖 `run.py` 里那份 `CONFIG` | 无 |
+| `--memory_root` | 记忆库目录 | 内置默认 |
+
+每个参数都能用同名环境变量给默认值（`DEMO_MODE` / `VOICEMEM_PORT` / `VOICEMEM_CONFIG` /
+`VOICEMEM_MEMORY_ROOT`）。浏览器打开 http://localhost:8787 ，WebSocket 协议见
 [docs/PROTOCOL.md](docs/PROTOCOL.md)。
+
+### 不开浏览器：喂一个 wav 跑通整条链
+
+```bash
+python example.py --audio speech.wav --step_ms 600 --confirm_ms 500 --no-reply
+```
+
+`--no-reply` 只出记忆检索、不调回复模型（不花 API 钱）。输出长这样——`[speculate]`
+那行是**你还在说的时候**就跑完的检索：
+
+```text
+▶ speech.wav  4.7s @ 16000Hz，600ms 一块
+🎙️  你好我叫贾琪我在新加坡国立大
+[speculate] '你好我叫贾琪我在新加坡国立大学读' -> 5 hits  887ms
+🧑 你好我叫贾琪我在新加坡国立大学读书
+   记忆: ...
+```
+
+手头没 wav？macOS 上一行造一个：
+
+```bash
+say -v Tingting -o t.aiff "我是素食主义者，对坚果过敏。" \
+  && afconvert -f WAVE -d LEI16@16000 -c 1 t.aiff speech.wav
+```
 
 ## Released Model
 
