@@ -28,7 +28,7 @@
 
 ## Overview
 
-* **[Quick Start](#quick-start)** —— 安装 · [三种输入接口](#interfaces) · 跑 demo
+* **[Quick Start](#quick-start)** 
 * **[Architecture](#architecture)**
 * **[Models](#models)**
 * **[Demo](#demo)**
