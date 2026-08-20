@@ -10,95 +10,85 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Lang Jiaqi" }]
+
+# Keep the default installation lightweight. No local speech, audio, or
+# multimodal model runtime is installed by `pip install voicemem`.
 dependencies = [
     "numpy",
     "openai",
-    # Raw fact storage backend (voicemem/leftbrain/mem0_backend_store.py) --
-    # voicemem's own cognitive_graph/rightbrain graph layers stay custom code,
-    # this only replaces the low-level "store text + embed + vector search"
-    # layer that used to be voicemem's own from-scratch SQLite store.
     "mem0ai",
 ]
 
 [project.optional-dependencies]
-# Prosody-based VAD emotion estimation straight from the waveform
-# (emotion/vad_audio.py).
+# Qwen2.5-Omni runtime for multimodal audio attribution.
+# Model weights are resolved separately at runtime and are not bundled in the
+# Python wheel.
+slm = [
+    "torch",
+    "transformers==4.52.3",
+    "accelerate",
+    "qwen-omni-utils",
+    "soundfile",
+]
+
+# Backward-compatible name for existing users of the old extra.
+omni = [
+    "voicemem[slm]",
+]
+
 audio = [
     "soundfile",
 ]
-# Background-scene / music / abnormal-sound detection via the Audio
-# Spectrogram Transformer (environment_detector_ast.py) — the default,
-# immediate-hint environmental sound backend. The model weights are
-# downloaded once by Transformers, or can be shipped beside the application
-# and selected with VOICEMEM_ENVIRONMENT_MODEL_DIR.
+
 environment = [
     "torch",
     "transformers",
     "soundfile",
     "scipy",
 ]
-# Optional CLAP refinement pass for the background-sound *description* memory
-# only (4s-segmented, higher accuracy than AST's raw hint). AST still supplies
-# the immediate hint and still covers music/abnormal-sound detection and the
-# place-clustering embedding. Set VOICEMEM_CLAP_CHECKPOINT to enable.
+
 clap = [
     "torch",
     "laion-clap",
     "soundfile",
     "scipy",
 ]
-# Multimodal emotion attribution directly on raw audio via Qwen2.5-Omni
-# (emotion/attribution_qwen_omni.py) — see examples/load_qwen_omni_attributor.py.
-omni = [
-    "torch",
-    "transformers>=4.50",
-]
-# Speaker recognition (3D-Speaker ERes2Net via a sherpa-onnx worker subprocess
-# + adaptive voiceprint profiles), plus optional emotion2vec+ emotion
-# detection (funasr/modelscope). Heavy; kept separate from the base install.
+
 voiceprint = [
     "sherpa-onnx",
     "funasr",
     "modelscope",
 ]
-# ── 下面按「三个输入接口」分组，上面那些是按单个能力细分的零件 ───────────────
-# 是递进关系：text ⊂ wav ⊂ stream。
-#
-# ① 文本：vm.ingest(text) / vm.search()。基础依赖(numpy/openai/mem0ai)已经能跑，
-#    这里补的是**默认的本地 slot 分类器**（E5 余弦，0 LLM 0 网络，见 defaults.py
-#    的 schema）。同一份 E5 也供 {"embedding": {"provider": "local"}} 复用。
+
 text = [
     "sentence-transformers",
 ]
-# ② wav：vm.ingest(text, audio=...) / vm.preprocess(...)。文本由上游 ASR 转好，
-#    这里跑的是**语音记忆层**——声纹（sherpa-onnx 子进程）+ 声学场景（AST）+ 情绪。
-#    只要输入是语音模态就该有这一层，跟流不流式无关。
+
 wav = [
     "voicemem[text]",
-    "sherpa-onnx",          # 声纹 3D-Speaker ERes2Net
+    "sherpa-onnx",
     "soundfile",
     "scipy",
-    "torch",                # 声学场景 AST
+    "torch",
     "transformers",
 ]
-# ③ 流式：vm.stream().feed(pcm)。在 ② 的语音记忆层之上，再加自带的流式 ASR 与
-#    分轮 VAD（silero 走 sherpa-onnx，已在 wav 里）。
+
 stream = [
     "voicemem[wav]",
-    "funasr",               # 默认流式 ASR paraformer-zh-streaming
+    "funasr",
     "modelscope",
 ]
-# 全套 = 流式那档（它已经含 text 和 wav）
+
 all = [
-    "voicemem[stream]",
+    "voicemem[stream,slm,clap]",
 ]
-# web/ 脑图 demo 的服务器。**只是个 demo**，用 voicemem 本身不需要它。
+
 web = [
     "voicemem[all]",
     "fastapi",
     "uvicorn",
 ]
-# 老名字别名（`[demo]` 过去就是「全套 + demo 服务器」的意思）。
+
 demo = [
     "voicemem[web]",
 ]

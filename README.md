@@ -5,14 +5,17 @@
 ---
 
 <p align="center">
-  <a href="#quick-start">Quick Start 🚀</a> /
-  <a href="#architecture">Architecture 🧠</a> /
-  <a href="QUICKSTART.md">语音 Demo 🎙️</a>
+  <a href="https://arxiv.org/abs/2605.19833">Technical Report 📖</a> /
+  <a href="https://huggingface.co/datasets/zhifeixie/Voices-in-the-Wild-2M">Voices-in-the-wild-2M 🤗</a> /
+  <a href="https://huggingface.co/zhifeixie/Mega-ASR">Mega-ASR Weights 🤗</a> /
+  <a href="https://github.com/xzf-thu/Voices-in-the-Wild-Bench">Voices-in-the-Wild-Bench 🏆</a>
 </p>
 
 <p align="center">
-  <a href="https://huggingface.co/LangJiaqi77/Voicemem-Qwen3_6-35B-A3B-QLoRA-v2"><img src="https://img.shields.io/badge/HuggingFace-Model-FFD21E?logo=huggingface&logoColor=black" alt="HF Model"></a>&nbsp;<a href="https://lang-jiaqi.github.io/Voicemem_open/"><img src="https://img.shields.io/badge/Project-Page-blue" alt="Project Page"></a>&nbsp;<img src="https://img.shields.io/badge/License-Apache%202.0-green" alt="License">&nbsp;<a href="https://github.com/lang-jiaqi/Voicemem_open"><img src="https://img.shields.io/github/stars/lang-jiaqi/Voicemem_open?style=social" alt="GitHub stars"></a>&nbsp;<a href="#"><img src="https://img.shields.io/badge/WeChat-Join%20Group-07C160?logo=wechat&logoColor=white" alt="WeChat"></a>&nbsp;<a href="#"><img src="https://img.shields.io/badge/X-VoiceMem-black?logo=x&logoColor=white" alt="X"></a>
+  <a href="https://github.com/xzf-thu/Mega-ASR/raw/main/assets/wechat.jpg"><img src="https://img.shields.io/badge/WeChat-Join%20Group-07C160?logo=wechat&logoColor=white" alt="WeChat"></a> <a href="https://xzf-thu.github.io/Mega-ASR/"><img src="https://img.shields.io/badge/Project-Page-blue" alt="Project Page"></a> <a href="https://x.com/XieZhifei14110"><img src="https://img.shields.io/badge/X-@XieZhifei14110-black?logo=x&logoColor=white" alt="X"></a>
 </p>
+
+<p align="cente
 
 ---
 
@@ -44,116 +47,83 @@
 git clone https://github.com/lang-jiaqi/Voicemem_open.git
 cd Voicemem_open
 
-pip install -e ".[all]"                      # 三个输入接口全套
-bash scripts/download_models.sh models       # 本地模型（silero VAD 没有自动下载兜底）
-export OPENAI_API_KEY=sk-...
+## Memory system installation
+pip install voicemem
+
+## Use VoiceMem Model Families:
+pip install "voicemem[slm]"
 ```
 
-> 只要文本记忆（下面的 ①）？`pip install -e ".[text]"` 就够，一个模型都不用下。
-> 中间那档 `".[wav]"` 是文本 + 语音记忆层（声纹 / 声学场景 / 情绪），不含流式 ASR。
-> 三档递进：`text` ⊂ `wav` ⊂ `all`。`-e` 是可编辑安装，还没发 PyPI，所以从 clone 装。
+### Required Model Download
 
-### 默认配置
+```bash
+pip install -U huggingface_hub
+hf download zhifeixie/VoiceMem_default --local-dir ./models
+```
 
-装完不用配任何东西，开箱就是这一套：
 
-| 能力 | 默认 | 跑在哪 |
-|---|---|---|
-| 流式 ASR | FunASR `paraformer-zh-streaming` | 本地，首次运行自动下 |
-| VAD（判「说完了」） | silero | 本地，`download_models.sh` 下 |
-| 记忆向量 | `text-embedding-3-small` | OpenAI API |
-| slot 分类 | 本地 E5 余弦（0 LLM） | 本地 |
-| 回复 | `gpt-4o-mini` | OpenAI API |
-| 声纹 / 声学场景 / 情绪 | 3D-Speaker / AST / 声学启发式 | 本地 |
+### Basic usage <a id="interfaces"></a>
 
-每一项都能换成本地模型或你自己的——但**先按默认跑通再说**，换法见 [Models](#models)。
-
-### 三种输入接口 <a id="interfaces"></a>
-
-文本 / wav / 流式，三者在核心并列。① 复制就能跑；② ③ 把 `turn.wav` / `speech.wav`
-换成你自己的音频（16k mono 最省事，其它采样率 `src_rate` 会自动重采样）。
-
-**① 文本**
-
+**Run as an Offline Memory Engine**
 ```python
 from voicemem import VoiceMem
 
-vm = VoiceMem(mode="text_mode")               # 读上面 export 的 OPENAI_API_KEY
+vm = VoiceMem(mode="normal",
+              openai_key="api_xxx",
+              top_k = 5)          
+
+# 存：音频文件（内部跑ASR/声纹/场景/情绪感知/Embedding抽取）
+vm.ingest(audio="input.wav") # 我是素食主义者，对坚果过敏
+result = vm.search("我的饮食禁忌是什么？")  
+print(result.result_leftbrain, result.result_rightbrain)
+
+
+# 存：左脑信息文本（无情感）
+
+vm = VoiceMem(mode="leftbrain_only",
+              openai_key="api_xxx",
+              top_k = 5)             
 
 vm.ingest("我是素食主义者，对坚果过敏。")
-result = vm.search("我的饮食禁忌是什么？")     # 左右脑一起检索
-for hit in result.hits:
-    print(hit.text)
+result = vm.search("我的饮食禁忌是什么？")     
 ```
 
-**② 语音（wav）**
-
-```python
-from voicemem import VoiceMem
-
-vm = VoiceMem(mode="multi_modal")             # 读上面 export 的 OPENAI_API_KEY
-
-# 存：上游转好的文本 + 音频文件（内部跑声纹/场景/情绪感知）
-vm.ingest("今天在咖啡馆和 Alex 聊了创业。", audio="turn.wav")
-
-# 只拿声学信号、不写记忆
-sig = vm.preprocess("今天在咖啡馆和 Alex 聊了创业。", audio="turn.wav")
-print(sig.speaker, sig.emotion, sig.scene_tag)      # 说话人 / 情绪 / 声学场景
-
-for hit in vm.search("我和 Alex 聊了什么？").hits:
-    print(hit.text)
-```
-
-**③ 流式（逐块喂音频）**
+**Run VoiceMem in streaming (Just treat it as VAD)**
 
 ```python
 import asyncio
+from pprint import pprint
 import numpy as np
 import soundfile as sf
-from voicemem import VoiceMem
 
-# 统一 config：本地 E5，0 网络
-vm = VoiceMem.from_config({
-    "mode": "multi_modal",
-    "embedding": {"provider": "local"},
-    "slots":     {"provider": "local"},
-})
+
 
 async def main():
-    audio, sr = sf.read("speech.wav", dtype="float32")     # mono
-    pcm16 = (np.clip(audio, -1, 1) * 32767).astype(np.int16)
+    audio, sr = sf.read("speech.wav", dtype="float32")
+    pcm = (np.clip(audio, -1, 1) * 32767).astype(np.int16)
+    stream = vm.stream(
+        src_rate=sr,
+        vad_threshold=0.5,
+        on_partial=lambda t: print(f"\r[partial] {t}", end="", flush=True),
+    )
+    step = int(sr * .032)
 
-    # 边喂边出 partial；VAD 判说完时拿到一轮记忆结果（0–500ms 投机预取、barge-in）
-    stream = vm.stream(on_partial=lambda t: print(f"\r{t}", end="", flush=True), src_rate=sr)
+    for i in range(0, len(pcm), step):
+        st = await stream.feed(pcm[i:i + step].tobytes())
+        print(f"\n[state] {st.state}")
 
-    step = int(sr * 0.6)                                   # 600ms 一块
-    for i in range(0, len(pcm16), step):
-        st = await stream.feed(pcm16[i:i+step].tobytes())  # 每块都返回 StreamState
-        # st.state  "<speak>" | "<silence>"
-        # st.memory 边说边预取到的 SearchResult；还没算好时 None
-        if st.turn:                                        # 一轮说完才非 None
-            print("\n[说完]", st.turn.text)
-            for hit in st.turn.result.hits:
-                print("  记忆:", hit.text)
+        FIELDS = ["result_leftbrain", "result_rightbrain", "speaker_id", "speaker_voiceprint", "emotion", "transcript", "entity", "schema", "text_embedding"]
+        if st.state == "turn_over":
+            pprint({key: getattr(st, key) for key in FIELDS})
 
 asyncio.run(main())
 ```
 
-> **返回类型**：`feed` / `feed_partial` 每块都返回 **`StreamState`**，一轮说完时
-> `st.turn` 才是 `Turn`（`.text` / `.result` / `.memory_context`）；`feed_text("…")`
-> 是打字轮，直接返回 `Turn`。
->
-> 接**外部 ASR**（FunASR / Whisper / 云 ASR）就把 ③ 的 `feed` 换成
-> `await stream.feed_partial(累积转写, ended=外部VAD判说完)`——换 ASR 只改喂进来的
-> 那一行。完整示例见 [`scripts/realtime_funasr_qwen.py`](scripts/realtime_funasr_qwen.py)。
-
 ### 语音 Demo（脑图 + 0–500ms 投机预取）
 
 ```bash
-python web/run.py                             # http://localhost:8787
-python web/run.py --mode realtime             # 更自然的原生语音（需 Realtime API 权限）
+python web/run.py    # http://localhost:8787
 ```
-参数见 [Demo](#demo)，详细步骤见 [QUICKSTART.md](QUICKSTART.md)。
 
 ## Architecture
 
