@@ -1,25 +1,62 @@
 #!/usr/bin/env bash
-# 首次一次性：把本地已下好的语音模型（ASR / VAD / 声纹）上传到你的 HuggingFace repo，
-# 之后大家就能用 download_models.sh 从 HF 断点续传地下。upload_folder 也支持大文件续传。
+# 把本地 models/ 下按用途分好的模型传到发布仓库，之后别人用
+# download_models.sh 一条命令就能拉全（upload/download 都支持大文件断点续传）。
 #
 # 先登录一次（二选一）:
-#   huggingface-cli login          # 或
+#   hf auth login                  # 新版 CLI；旧版是 huggingface-cli login
 #   export HF_TOKEN=hf_xxx
 #
-# 用法（从仓库根目录）:
-#   VOICEMEM_HF_REPO=你的用户名/你的repo bash scripts/upload_models.sh [本地模型目录，默认 service/models]
+# 用法（**从仓库根目录**跑，不是 web/ 里）:
+#   bash scripts/upload_models.sh                    # 传 vad/asr/speaker/embedding/scene/emotion
+#   bash scripts/upload_models.sh models/vad         # 只传某一个目录
+#   VOICEMEM_MODELS_REPO=别人/别的repo bash scripts/upload_models.sh
+#
+# 传之前请确认各模型的许可允许再分发，并在仓库 README 里标明来源与 license。
 set -euo pipefail
 
-SRC="${1:-service/models}"
-REPO="${VOICEMEM_HF_REPO:-LangJiaqi77/voicemem-speech-models}"
+cd "$(dirname "$0")/.."          # 允许从任何目录调用，路径一律按仓库根算
 
-echo "[HF] 上传 $SRC -> $REPO（不存在会自动建 repo）..."
-python3 - "$REPO" "$SRC" <<'PY'
+REPO="${VOICEMEM_MODELS_REPO:-zhifeixie/VoiceMem_default}"
+DEST_ROOT="${VOICEMEM_MODELS_ROOT:-models}"
+
+# 不传的两样：voicemem-qwen3.6-*（发布清单，跟着代码仓库走）、slm（另有仓库）
+KINDS=(vad asr speaker embedding scene emotion tts)
+if [ $# -gt 0 ]; then
+  KINDS=()
+  for a in "$@"; do KINDS+=("$(basename "$a")"); done
+fi
+
+FOUND=()
+for k in "${KINDS[@]}"; do
+  if [ -d "${DEST_ROOT}/${k}" ] && [ -n "$(ls -A "${DEST_ROOT}/${k}" 2>/dev/null)" ]; then
+    FOUND+=("$k")
+  else
+    echo "跳过 ${k}/（不存在或为空）"
+  fi
+done
+
+if [ ${#FOUND[@]} -eq 0 ]; then
+  echo "没有可传的目录。先跑：bash scripts/download_models.sh"
+  exit 1
+fi
+
+echo "[HF] 目标仓库 ${REPO}"
+echo "[HF] 将上传：${FOUND[*]}"
+for k in "${FOUND[@]}"; do
+  echo
+  echo "── ${k}/ （$(du -sh "${DEST_ROOT}/${k}" | cut -f1)）"
+  python3 - "$REPO" "${DEST_ROOT}/${k}" "$k" <<'PY'
 import sys
 from huggingface_hub import HfApi
-repo, src = sys.argv[1], sys.argv[2]
+repo, src, kind = sys.argv[1], sys.argv[2], sys.argv[3]
 api = HfApi()
 api.create_repo(repo, repo_type="model", exist_ok=True)
-api.upload_folder(folder_path=src, repo_id=repo, repo_type="model")
-print("上传完成:", repo)
+# path_in_repo=kind：仓库里就是一个用途一个文件夹，跟本地 models/ 布局一致，
+# 这样 download 下来直接能用，代码不用再做映射。
+api.upload_folder(folder_path=src, repo_id=repo, repo_type="model", path_in_repo=kind)
+print(f"   ✓ {kind}/")
 PY
+done
+
+echo
+echo "完成。验证：bash scripts/download_models.sh /tmp/vm_models_check"
