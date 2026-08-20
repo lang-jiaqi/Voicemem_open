@@ -121,7 +121,7 @@ async def voicemem_llm_tts(pending, send, send_audio):
     await send({"type": "answer_done"})
     async for pcm in utils.tts_stream(reply, REPLY):
         await send_audio(pcm)
-    vm.ingest(pending.text)
+    vm.ingest(pending.text, agent_reply=reply)       # 两半一起存：agent 说的这句也进记忆
 
 
 async def voicemem_realtime(pending, conn, send, send_audio):
@@ -137,13 +137,16 @@ async def voicemem_realtime(pending, conn, send, send_audio):
                                                   "content": [{"type": "input_text", "text": pending.text}]})
     await conn.response.create()
     await send({"type": "answer_start"})
+    reply = ""                                            # 原生语音也有转写，攒起来一起存
     async for ev in conn:
         t = getattr(ev, "type", "")
         if t.endswith("output_audio.delta"):               await send_audio(base64.b64decode(ev.delta))
-        elif t.endswith("output_audio_transcript.delta"):  await send({"type": "answer_delta", "text": ev.delta})
+        elif t.endswith("output_audio_transcript.delta"):
+            reply += ev.delta
+            await send({"type": "answer_delta", "text": ev.delta})
         elif t.endswith("response.done"):                  break
     await send({"type": "answer_done"})
-    vm.ingest(pending.text)
+    vm.ingest(pending.text, agent_reply=reply)       # 两半一起存：agent 说的这句也进记忆
 
 
 # ══════════════════ 驱动 voicemem 核心流式会话（vm.stream()）══════════════════

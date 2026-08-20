@@ -77,16 +77,24 @@ def _rb_ctx_to_hits(rb_ctx) -> list["RightBrainHit"]:
     en = _rb_lang(rb_ctx)
     hits: list[RightBrainHit] = []
     for m in rb_ctx.response_experiences:
-        failed = (m.metadata or {}).get("previous_failure", False)
+        meta = m.metadata or {}
+        failed = meta.get("previous_failure", False)
         prefix = (
             ("⚠ " + ("Avoid repeating: " if en else "避免重复："))
             if failed else
             ("✓ " + ("Effective approach: " if en else "有效方式："))
         )
+        # content 只说了"当时怎么做的"，next_time_policy 才是可执行的那半句。
+        # 用户为什么那么反应不在这里拼——那是用户特征，走图层的 profile hit。
+        body = m.content
+        policy = str(meta.get("next_time_policy") or "").strip()
+        if policy:
+            body += f" (next time: {policy})" if en else f"（下次：{policy}）"
         hits.append(RightBrainHit(
-            content=f"{_rb_mem_date(m)}{prefix}{m.content}", source="response_experience",
+            content=f"{_rb_mem_date(m)}{prefix}{body}", source="response_experience",
             priority=_rb_blended_priority(m),
-            metadata={"failed": failed, "anchor_score": getattr(m, "anchor_score", 0.0)},
+            metadata={"failed": failed, "anchor_score": getattr(m, "anchor_score", 0.0),
+                      "next_time_policy": policy},
         ))
     for m in rb_ctx.situation_patterns:
         meta = m.metadata or {}
@@ -131,6 +139,44 @@ def _rb_ctx_to_hits(rb_ctx) -> list["RightBrainHit"]:
             content=head + sep.join(now), source="current_signal", priority=0.95,
         ))
     return hits
+
+
+# ── 用户对 agent 上一句的反应 ─────────────────────────────────────────────────
+# 检索路径要 0 LLM（README 读写分离），所以这里纯词面判定。只认明说的反应词，
+# 且必须有 agent 上一句——用户情绪不好 ≠ agent 说错话。
+_DISSATISFIED_CUES = (
+    "不对", "不是这个", "不是这样", "不是我要", "你没懂", "没听懂", "听不懂",
+    "答非所问", "别说了", "无语", "敷衍", "废话", "没用",
+    "not what i", "that's not", "thats not", "you don't get", "you dont get",
+    "never mind", "nevermind", "forget it", "useless", "not helpful",
+    "didn't ask", "didnt ask",
+)
+_CORRECTION_CUES = (
+    "我说的是", "我是说", "我不是说", "我没说过", "记错", "搞错", "弄错", "纠正",
+    "i said", "i meant", "you got it wrong", "that's wrong", "thats wrong",
+    "no, i ", "actually, i", "actually i ",
+)
+_APPRECIATION_CUES = (
+    "谢谢", "多谢", "太好了", "就是这个", "正是", "懂我", "有帮助", "帮大忙", "说得对",
+    "thanks", "thank you", "exactly", "perfect", "that helps", "helpful",
+    "good point", "appreciate",
+)
+
+
+def _hits_any(text: str, cues: tuple[str, ...]) -> bool:
+    low = text.lower()
+    return any(c in low for c in cues)
+
+
+def _reaction_signals(user_text: str, agent_reply: str = ""):
+    """(用户这句, agent 上一句) → CurrentSignals：用户在不满/纠正 agent 吗？"""
+    from voicemem.rightbrain.types import CurrentSignals
+    if not (agent_reply or "").strip() or not (user_text or "").strip():
+        return CurrentSignals()
+    return CurrentSignals(
+        dissatisfaction_signal=_hits_any(user_text, _DISSATISFIED_CUES),
+        correction_signal=_hits_any(user_text, _CORRECTION_CUES),
+    )
 
 
 def _rb_graph_hits(rb_graph, user_id: str) -> list["RightBrainHit"]:
@@ -308,19 +354,26 @@ class RightBrain:
 
     def search(
         self, query: str, activated_names: list[str], emotion: str | None, top_k: int,
+        agent_reply: str = "",
     ) -> tuple[list["RightBrainHit"], str]:
         """右脑并发检索段（原 Search() 里的 _run_rb 闭包）：build_query_plan →
         retrieve → 关系/情绪特质/画像图层 → 按 priority 排序截断，返回
-        (rb_hits, rb_directive)。异常时降级为无右脑（空列表 + 空指导）。"""
+        (rb_hits, rb_directive)。异常时降级为无右脑（空列表 + 空指导）。
+
+        ``agent_reply``：agent 上一轮那句。用户正在回应它，两处用到——① 反应信号
+        （不满/纠正 → retrieve 多给一条回应经验名额）；② 它提到的实体以 context
+        角色、半权重进锚点。纯词面判定，检索路径依旧 0 LLM。
+        """
         try:
-            from voicemem.rightbrain.types import CurrentSignals
             rb_repo = self._rb_repo()
+            signals = _reaction_signals(query, agent_reply)
             # 右脑接收左脑"已激活实体"作锚点（联合检索：右脑依赖左脑激活结果）
             plan    = rb_repo.build_query_plan(
                 query, self._user_id,
-                signals=CurrentSignals(),
+                signals=signals,
                 entities=activated_names or None,
                 emotion=emotion,
+                context=agent_reply or None,
             )
             rb_ctx = rb_repo.retrieve(plan)
             collected: list[RightBrainHit] = _rb_ctx_to_hits(rb_ctx) if not rb_ctx.is_empty() else []
@@ -348,11 +401,16 @@ class RightBrain:
 
     # ── 右脑写入 ────────────────────────────────────────────────────────────────
 
-    def write(self, emotion, result, text, entities, observed_at) -> None:
+    def write(self, emotion, result, text, entities, observed_at,
+              agent_reply: str = "") -> str | None:
         """右脑写入段：每条 utterance 一条 heartnote，挂 emotion + entity anchors +
         关系节点 + 右脑 slot→entity 图层。gate 只看 emotion（不绑 result.memory_ids）——
         纯情绪句左脑可能抽不出事实但情绪仍值得记；mid 为空时不挂证据、不查左脑实体
-        链接，但情绪锚点 + 文本实体名锚点仍正常写。"""
+        链接，但情绪锚点 + 文本实体名锚点仍正常写。
+
+        ``agent_reply``：agent 上一轮那句。同一句"行吧"，跟在共情后面和跟在甩方案
+        后面是两种情绪——喂给内心 OS 生成，并存进 metadata 留证据。
+        """
         if not emotion:
             return
         try:
@@ -362,7 +420,7 @@ class RightBrain:
 
             # content 存原话，inner_os 进 metadata（渲染时作为补充拼在原话
             # 后面，见 _rb_ctx_to_hits）——避免共情改写抹掉数字/名字/时间等细节。
-            inner_os = self._generate_inner_os(text, emotion, entities or [])
+            inner_os = self._generate_inner_os(text, emotion, entities or [], agent_reply)
             content = text
 
             # 事件时间用 observed_at（与左脑 time_start 同源），不用写入墙钟
@@ -372,7 +430,9 @@ class RightBrain:
                 memory_class="heartnote",
                 content=content,
                 metadata={"emotion": emotion, "entities": entities or [],
-                          "left_memory_id": mid, "inner_os": inner_os or ""},
+                          "left_memory_id": mid, "inner_os": inner_os or "",
+                          # 情绪的触发上下文：这句话是接在 agent 的哪句后面说的
+                          "agent_reply": (agent_reply or "").strip()},
                 evidence_memory_ids=[mid] if mid else [],
                 created_at=_obs,
             )
@@ -437,20 +497,186 @@ class RightBrain:
                     tracker.touch(self._user_id, "rb_slot_long", emo_slot.id)
 
                 for slot_name, label in self._extract_rb_traits(text, emotion):
-                    slot = rb_graph.get_slot_by_name(self._user_id, slot_name)
-                    if slot is None:
-                        continue
-                    label_emb = self._embed(label)
-                    g_ent, _created = rb_graph.get_or_create_entity_semantic(
-                        self._user_id, slot.id, label, label_emb,
-                    )
-                    rb_graph.link_memory(g_ent.id, self._user_id, rb_mem.id)
-                    tracker.touch(self._user_id, "rb_entity_short", g_ent.id)
-                    tracker.touch(self._user_id, "rb_slot_long", slot.id)
+                    self._write_trait(slot_name, label, rb_mem.id)
             except Exception as e:
                 print(f"[RBGraph] 右脑图层写入失败: {e}")
+            return rb_mem.id
         except Exception as e:
             print(f"[Ingest] right brain write skipped: {e}")
+            return None
+
+    def _write_trait(self, slot_name: str, label: str, memory_id: str) -> bool:
+        """往图层 slot 下挂一个语义去重的特质 entity，并把这条记忆作为证据链上去。
+        description 交给 AttributionManager 从证据里归纳，这里只负责挂 + touch。"""
+        if not slot_name or not label:
+            return False
+        rb_graph = self._rb_graph_store()
+        slot = rb_graph.get_slot_by_name(self._user_id, slot_name)
+        if slot is None:
+            return False
+        ent, _created = rb_graph.get_or_create_entity_semantic(
+            self._user_id, slot.id, label, self._embed(label),
+        )
+        rb_graph.link_memory(ent.id, self._user_id, memory_id)
+        tracker = self._tracker()
+        tracker.touch(self._user_id, "rb_entity_short", ent.id)
+        tracker.touch(self._user_id, "rb_slot_long", slot.id)
+        return True
+
+    # ── 回应成败经验（agent 自己说过的话，被用户的反应打分）──────────────────────
+
+    #: 归因每段的字数上限——这几段每轮都要拼进 system prompt，松了就是固定开销。
+    _EXPERIENCE_MAX_CHARS = 60
+
+    _ATTRIBUTION_PROMPT = """你在给助手的回应打分：用户这轮是不是在对助手那句作出反应？只输出 JSON。
+
+助手那句：{reply}
+用户这轮：{user}{emotion_line}
+
+{{"significant": bool,
+  "assistant_helped": "助手那句帮到用户了(true)还是帮了倒忙(false)",
+  "assistant_did": "主语必须是助手：助手那句用了什么做法，可迁移不抄原话，"
+                   "如「直接给了分点方案」「先接住情绪再问细节」",
+  "next_time": "助手以后遇到类似情形怎么做（可执行的动作）",
+  "user_reaction": "主语必须是用户：用户的反应",
+  "why": "为什么这么反应（落到助手那句的哪一点）",
+  "user_trait": {{"slot": "表达风格|应对方式|思维模式|喜好与厌恶", "label": "这个反应
+    透露出的用户长期特征，如「被直接给方案会关闭」「不满时直说不绕弯」；
+    只是这一次的情境反应、看不出长期特征就填 null"}}}}
+
+significant 默认 false，只有这几种才 true：
+明确不满 / 纠正助手 / 明确道谢认可 / 因为助手那句情绪明显变化 /
+敷衍收尾（"算了""随便吧""你说吧"这种把话头推回来的）。
+以下一律 false：继续讲自己的事、回答助手的问题、提新要求、寒暄。
+用户情绪不好 ≠ 助手说错话。
+significant 不管真假，其余字段都要照填（调用方另有判定）。
+文本字段各 ≤{n} 字，语言跟用户那句一致。"""
+
+    def _attribute_reaction(self, user_text: str, agent_reply: str, emotion: str) -> dict:
+        """(助手上一句 + 用户这轮) → 归因：记不记 + 反应/为什么/下次怎么做。
+
+        分工是刻意的——**该不该记不全交给模型**：小模型在这个判断上会抖，实测同一
+        句"不是这个意思，你根本没懂"两次跑出相反结论，漏掉的恰恰是最该记的。
+          · 词面命中（不满/纠正/感谢）→ 强制记，好坏也由词面定，模型只写文本；
+          · 词面没命中 → 灰区（"……算了，你说吧"）交给模型判 significant。
+        """
+        sigs = _reaction_signals(user_text, agent_reply)
+        forced_failed = bool(sigs.dissatisfaction_signal or sigs.correction_signal)
+        forced = forced_failed or _hits_any(user_text, _APPRECIATION_CUES)
+
+        emotion_line = f"\n（情绪识别：{emotion}）" if emotion else ""
+        raw = self._llm_json(self._ATTRIBUTION_PROMPT.format(
+            reply=agent_reply[:300], user=user_text[:300],
+            emotion_line=emotion_line, n=self._EXPERIENCE_MAX_CHARS,
+        ))
+        data = {}
+        if raw:
+            try:
+                import json as _json
+                parsed = _json.loads(raw)
+                if isinstance(parsed, dict):
+                    data = parsed
+            except Exception as e:
+                print(f"[RBExperience] 归因解析失败: {e}")
+
+        if forced:
+            data["significant"] = True
+            data["assistant_helped"] = not forced_failed
+            data.setdefault("assistant_did", agent_reply[:self._EXPERIENCE_MAX_CHARS])
+            if not str(data.get("user_reaction") or "").strip():
+                en = _is_en_text(user_text)
+                data["user_reaction"] = (
+                    (("user corrected it" if sigs.correction_signal else "user pushed back")
+                     if forced_failed else "user said it helped") if en else
+                    (("用户纠正了" if sigs.correction_signal else "用户表示不满")
+                     if forced_failed else "用户认可"))
+        return data if "significant" in data else {"significant": False}
+
+    def learn_from_reaction(self, text: str, emotion: str, entities, agent_reply: str,
+                            memory_id: str | None = None, observed_at=None,
+                            heartnote_id: str | None = None) -> None:
+        """(助手上一句 + 用户这轮) → 情绪归因，有必要才落一条 response_experience。
+
+        产物分两处存，因为它们是两类东西：
+          · 助手侧「做法 + 下次怎么做」→ response_experience（content 存可迁移的
+            做法，存原话换个话题就用不上；next_time 进 metadata）
+          · 用户侧「透露出的长期特征」→ 图层 slot（表达风格/应对方式…），由归因
+            归纳成人格描述，跨话题都能用
+
+        不受 write() 那个 ``if not emotion`` 管——"不是这个意思"是行为信号，跟声学
+        情绪有没有输出无关（text_mode 下 emotion 常为空）。没有助手上一句直接返回，
+        所以第一轮不调 LLM。
+        """
+        reply = (agent_reply or "").strip()
+        if not reply or not (text or "").strip():
+            return
+        try:
+            attribution = self._attribute_reaction(text, reply, emotion or "")
+            if not attribution.get("significant"):
+                return
+
+            from voicemem.rightbrain.types import MemoryAnchor
+            from voicemem.rightbrain.anchor_router import normalize_emotion_strict
+
+            def _clip(v) -> str:
+                s = str(v or "").strip()
+                return s if len(s) <= self._EXPERIENCE_MAX_CHARS else s[:self._EXPERIENCE_MAX_CHARS] + "…"
+
+            what_i_did = _clip(attribution.get("assistant_did")) or _clip(reply)
+            reaction   = _clip(attribution.get("user_reaction"))
+            why        = _clip(attribution.get("why"))
+            next_time  = _clip(attribution.get("next_time"))
+            failed     = not bool(attribution.get("assistant_helped", False))
+
+            en = _is_en_text(text)
+            condition = (f"{reaction}{' — ' + why if why else ''}" if en
+                         else f"{reaction}{'；' + why if why else ''}")
+
+            # global_style：每个查询计划都带这个兜底锚点，所以这条教训每轮都捞得到
+            # ——"别再这么回应"不该等同一话题重现才想起来。情绪/实体再叠话题相关性。
+            anchors = [
+                MemoryAnchor(anchor_type="global_style", anchor_id="global_style",
+                             role="global_profile", weight=1.0, confidence=1.0),
+            ]
+            canonical = normalize_emotion_strict(emotion) if emotion else None
+            if canonical is not None:
+                anchors.append(MemoryAnchor(anchor_type="emotion", anchor_id=canonical,
+                                            role="trigger", weight=1.0, confidence=1.0))
+            for name in (entities or []):
+                key = str(name).lower().strip()
+                if key:
+                    anchors.append(MemoryAnchor(anchor_type="entity", anchor_id=key,
+                                                role="subject", weight=0.8, confidence=1.0))
+
+            _obs = (str(observed_at)
+                    if observed_at and re.match(r"^\d{4}-\d{2}-\d{2}", str(observed_at))
+                    else None)
+            exp = self._rb_repo().write_response_experience(
+                self._user_id, what_i_did, anchors,
+                condition=condition,
+                failed=failed,
+                # 反应/原话留底当证据，不进 prompt——用户侧的结论在图层那边
+                metadata={"next_time_policy": next_time, "why": why, "reaction": reaction,
+                          "agent_reply": reply[:300], "user_reaction": text.strip()[:200],
+                          "emotion": emotion or ""},
+                evidence_memory_ids=[memory_id] if memory_id else [],
+                created_at=_obs,
+            )
+            print(f"[RBExperience] {'失败' if failed else '有效'}：{what_i_did}"
+                  f" | 下次：{next_time}", flush=True)
+
+            # 用户侧的观察不留在这条经验里：「这人被直接给方案会关闭」是长期特征，
+            # 该沉淀进图层 slot 由归因归纳成人格，否则只有这条经验被检中才看得见。
+            trait = attribution.get("user_trait") or {}
+            if isinstance(trait, dict):
+                slot_name, label = str(trait.get("slot") or ""), _clip(trait.get("label"))
+                # 证据挂 heartnote（用户原话）——归因是读证据的 content 来写
+                # description 的，挂 exp 就成了"拿助手的做法去描述用户特征"。
+                if label and label.lower() not in ("null", "none") and \
+                        self._write_trait(slot_name, label, heartnote_id or exp.id):
+                    print(f"[RBTrait] {slot_name} ← {label}", flush=True)
+        except Exception as e:
+            print(f"[RBExperience] 回应经验写入失败: {e}")
 
     # ── 右脑清洁 ────────────────────────────────────────────────────────────────
 

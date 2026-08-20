@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .types import CurrentSignals, MemoryAnchor, MemoryQueryPlan
 
@@ -196,8 +196,15 @@ class AnchorRouter:
         signals: CurrentSignals | None = None,
         entities: list[str] | None = None,
         emotion: str | None = None,
+        context: str | None = None,
     ) -> MemoryQueryPlan:
-        anchors = self._build_anchors(query, user_id, hint_entities=entities, hint_emotion=emotion)
+        """``context``：agent 上一句。用户这句往往要放回它里面才完整（"那算了"），
+        所以它提到的实体也进锚点，但降为 context 角色、权重减半——它是背景，
+        不是用户这轮的主语。clean_text 仍只是用户原话。"""
+        anchors = self._build_anchors(
+            query, user_id, hint_entities=entities, hint_emotion=emotion,
+            context_text=context,
+        )
         return MemoryQueryPlan(
             user_id=user_id,
             clean_text=query.strip(),
@@ -207,41 +214,52 @@ class AnchorRouter:
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
-    def _build_anchors(self, query: str, user_id: str, hint_entities: list[str] | None = None, hint_emotion: str | None = None) -> list[MemoryAnchor]:
+    # agent 那句话里匹配到的实体，锚点权重打这个折（背景 < 用户这轮的主语）
+    _CONTEXT_WEIGHT_SCALE = 0.5
+
+    def _build_anchors(self, query: str, user_id: str, hint_entities: list[str] | None = None,
+                       hint_emotion: str | None = None,
+                       context_text: str | None = None) -> list[MemoryAnchor]:
         anchors: list[MemoryAnchor] = []
         seen_ids: set[str] = set()
 
         if self._store is not None:
             from voicemem.leftbrain.cognitive_graph.store import normalize_name
 
-            # 候选词：英文单词 + bigram（原有逻辑）
-            raw_words = re.findall(r"\b\w{2,}\b", query.lower())
-            candidates = [w for w in raw_words if w not in _STOP]
-            for i in range(len(raw_words) - 1):
-                a, b = raw_words[i], raw_words[i + 1]
-                if a not in _STOP and b not in _STOP:
-                    candidates.append(f"{a} {b}")
+            # 先扫用户那句：两边都提到的实体先被满权重占住，不会被背景那遍降下去
+            sources: list[tuple[str, float]] = [(query, 1.0)]
+            if context_text and context_text.strip():
+                sources.append((context_text, self._CONTEXT_WEIGHT_SCALE))
 
-            matched_entities = []
-            for cand in candidates:
-                ents = self._store.find_entities_by_name_fuzzy(user_id, cand)
-                for e in ents:
-                    if e.id not in seen_ids:
+            matched_entities: list[tuple[Any, float]] = []
+            all_ents = self._store.find_entities(user_id)   # 中文反查用，两遍共用一次查询
+            for text, scale in sources:
+                # 候选词：英文单词 + bigram（原有逻辑）
+                raw_words = re.findall(r"\b\w{2,}\b", text.lower())
+                candidates = [w for w in raw_words if w not in _STOP]
+                for i in range(len(raw_words) - 1):
+                    a, b = raw_words[i], raw_words[i + 1]
+                    if a not in _STOP and b not in _STOP:
+                        candidates.append(f"{a} {b}")
+
+                for cand in candidates:
+                    ents = self._store.find_entities_by_name_fuzzy(user_id, cand)
+                    for e in ents:
+                        if e.id not in seen_ids:
+                            seen_ids.add(e.id)
+                            matched_entities.append((e, scale))
+
+                # 中文反查：遍历所有实体名，检查是否出现在输入中
+                # （中文无空格分词，英文词边界正则对中文无效）
+                text_lower = text.lower()
+                for e in all_ents:
+                    if e.id in seen_ids:
+                        continue
+                    name_l = e.name.lower()
+                    name_n = (e.name_norm or "").lower()
+                    if len(name_l) >= 2 and (name_l in text_lower or name_n in text_lower):
                         seen_ids.add(e.id)
-                        matched_entities.append(e)
-
-            # 中文反查：遍历所有实体名，检查是否出现在输入中
-            # （中文无空格分词，英文词边界正则对中文无效）
-            query_lower = query.lower()
-            all_ents = self._store.find_entities(user_id)
-            for e in all_ents:
-                if e.id in seen_ids:
-                    continue
-                name_l = e.name.lower()
-                name_n = (e.name_norm or "").lower()
-                if len(name_l) >= 2 and (name_l in query_lower or name_n in query_lower):
-                    seen_ids.add(e.id)
-                    matched_entities.append(e)
+                        matched_entities.append((e, scale))
 
             # voice module 提供的 entities：直接用名字做 anchor（和 Ingest 写入一致）
             if hint_entities:
@@ -258,13 +276,15 @@ class AnchorRouter:
                         confidence=1.0,
                     ))
 
-            for ent in matched_entities:
+            for ent, scale in matched_entities:
                 anchor_type = _ENTITY_TYPE_TO_ANCHOR.get(ent.entity_type.value, "knowledge")
                 anchors.append(MemoryAnchor(
                     anchor_type=anchor_type,
                     anchor_id=ent.id,
-                    role=_ANCHOR_ROLE.get(anchor_type, "context"),
-                    weight=_ANCHOR_WEIGHT.get(anchor_type, 0.5),
+                    # 只在 agent 那句里出现的：记 context，权重减半
+                    role=("context" if scale < 1.0
+                          else _ANCHOR_ROLE.get(anchor_type, "context")),
+                    weight=_ANCHOR_WEIGHT.get(anchor_type, 0.5) * scale,
                     confidence=ent.confidence,
                 ))
                 # 右脑写入时实体锚点用的是 name.lower().strip()（core.py::Ingest 里的
@@ -278,14 +298,14 @@ class AnchorRouter:
                         anchor_type="entity",
                         anchor_id=name_key,
                         role="subject",
-                        weight=1.0,
+                        weight=1.0 * scale,
                         confidence=ent.confidence,
                     ))
 
             # entity_edge anchors：命中 ≥2 个实体时，把它们之间的边也加进来
             if len(matched_entities) >= 2:
-                entity_ids = [e.id for e in matched_entities]
-                for e in matched_entities:
+                entity_ids = [e.id for e, _ in matched_entities]
+                for e, _scale in matched_entities:
                     edges = self._store.edges_for_entity(e.id, user_id)
                     for edge in edges:
                         if (edge.from_entity_id in entity_ids

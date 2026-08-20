@@ -61,6 +61,8 @@ class VoiceInput:
     slots: list[str]
     contents: list[VoiceContent]
     environment: str = ""     # AST/CLAP background sound description, e.g. "background sounds: Washing machine(0.82)"
+    #: agent 那半边（contents 是用户那半边），抽取器靠它消歧
+    agent_reply: str = ""
 
     @classmethod
     def from_dict(cls, d: dict) -> "VoiceInput":
@@ -72,6 +74,7 @@ class VoiceInput:
             time_stamp=ts,
             slots=[str(s) for s in (d.get("slots") or [])],
             contents=[VoiceContent.from_dict(c) for c in (d.get("contents") or [])],
+            agent_reply=str(d.get("agent_reply", "") or ""),
         )
 
     @property
@@ -320,6 +323,11 @@ def voice_input_to_messages(
             current_sentences.append(c.sentence)
 
     _flush()
+
+    # agent 那半边接在最后：用户说"就它吧"，指代只有回复里能解开
+    if vi.agent_reply and vi.agent_reply.strip():
+        messages.append({"role": "assistant", "content": vi.agent_reply.strip()})
+
     return messages
 
 
@@ -445,7 +453,9 @@ def ingest_voice_input(
     # 抽取 prompt 里设计好的"Existing Memories 仅用于去重/linked_memory_ids"
     # 这道防线形同虚设——同一件事被反复整条重抽，全指望下游 ConflictResolver
     # 兜底。这里先拿整段 turn 文本粗召回一批，喂给抽取器做去重参考。
-    query_text = "\n".join(str(m.get("content", "")) for m in messages).strip()
+    # 只用用户那半边召回候选：agent 的回复长得多，掺进来会把该比对的旧记忆挤出前 10
+    query_text = "\n".join(str(m.get("content", "")) for m in messages
+                           if m.get("role") != "assistant").strip()
     existing_for_extraction: list[dict[str, str]] = []
     if query_text and hasattr(repo, "search"):
         try:

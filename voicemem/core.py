@@ -106,10 +106,14 @@ class VoiceMem:
 
         第一个参数可直接给 ``Turn``/``StreamState``（自动拆出 text 与 memory_context），
         也可以给一段文本 + 自己渲染好的 memory_context。
+
+        说完的这句自动登记给记忆层（``capture`` → ``remember_reply``），下次
+        ``ingest()`` 就带上 agent 这半边，调用方一行不用改。
         """
-        from voicemem.reply import unpack
+        from voicemem.reply import capture, unpack
         text, ctx = unpack(turn_or_text, memory_context)
-        return self._reply_fn()(text, ctx)
+        return capture(self._reply_fn()(text, ctx),
+                       lambda answer: self._o.remember_reply(text, answer))
 
     async def reply(self, turn_or_text, memory_context=""):
         """收全的回复：``answer = await vm.reply(turn)``。内部就是把 reply_stream 拼起来。"""
