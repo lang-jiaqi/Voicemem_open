@@ -9,7 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
@@ -137,7 +137,10 @@ def build_app(mode, session, classify):
     async def ws(sock: WebSocket):
         await sock.accept()
         await sock.send_json({"type": "session_ready", "mode": mode})
-        await session(sock)
+        try:
+            await session(sock)
+        except WebSocketDisconnect:
+            pass          # 关页面/刷新是正常结束，别刷一屏 traceback
 
     class Q(BaseModel):
         query: str

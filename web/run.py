@@ -129,8 +129,12 @@ async def voicemem_llm_tts(pending, send, send_audio):
 
     async def speak():
         while (seg := await queue.get()) is not None:
-            async for pcm in utils.tts_stream(seg, REPLY):
-                await send_audio(pcm)
+            try:
+                async for pcm in utils.tts_stream(seg, REPLY):
+                    await send_audio(pcm)
+            except Exception as e:                # 多半是听到一半关了页面，不是错误
+                print(f"[web] 语音发送中断：{type(e).__name__}", flush=True)
+                break
 
     speaker = asyncio.create_task(speak())
     reply, buf = "", ""
@@ -192,6 +196,8 @@ async def anticipate(sock, on_frame=None):
     last_partial = ""
     while True:
         msg = await sock.receive()
+        if msg.get("type") == "websocket.disconnect":         # 关页面/刷新：收工
+            return
         if msg.get("text"):                                   # 打字轮
             data = json.loads(msg["text"])
             if data.get("type") == "user_text" and data.get("text", "").strip():
