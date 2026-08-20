@@ -280,7 +280,31 @@ async def realtime_session(sock):
         async with utils.realtime_connect(REPLY) as conn:
             # 握手成功不代表能用：没权限/模型名不对时，OpenAI 是**连上之后**再发
             # close 4000（invalid_model / 权限错误）。所以要等第一次交互成功才算数。
-            await conn.session.update(session={"type": "realtime", "turn_detection": None})
+            # turn_detection 只借 OpenAI 的 VAD 做**打断**，不让它接管回合：
+            #   create_response=False    → 什么时候回复仍由我们决定（本地 VAD 判完
+            #                              一轮、记忆预取好，才 response.create）
+            #   interrupt_response=True  → 用户一开口，服务端直接掐掉正在播的回复
+            # 打断判定放在 OpenAI 那侧，是因为它直接对着音频流做；本地 VAD 要等
+            # 麦克风帧过完一整条链路（浏览器 AEC → ws → 重采样 → silero），真人
+            # 隔着扬声器插话时信号本来就弱，很容易判不出来。
+            # turn_detection 在 session.audio.input 下，**不是顶层**——写成顶层
+            # 会被静默拒绝（"Unknown parameter: session.turn_detection"，只以 error
+            # 事件回来，没人看就以为设上了）。原来那句 {"turn_detection": None} 一直
+            # 没生效，于是 server_vad 始终开着、自动抢着回复：它生成的 response 不带
+            # 我们注入的记忆，我们自己的 response.create 又撞上"已有 response 在跑"
+            # 而失败——语音轮"没用上记忆"就是这么来的。
+            #   create_response=False    → 什么时候回复由我们决定（本地 VAD 判完一轮、
+            #                              记忆预取好，才 response.create）
+            #   interrupt_response=True  → 用户一开口，服务端直接掐掉正在播的回复；
+            #                              这条判定在 OpenAI 侧直接对着音频流做，比
+            #                              本地 VAD（隔着 AEC + 网络 + 重采样）可靠
+            await conn.session.update(session={
+                "type": "realtime",
+                "audio": {"input": {"turn_detection": {
+                    "type": "server_vad", "create_response": False,
+                    "interrupt_response": True,
+                }}},
+            })
             connected = True
 
             # 这一轮的状态：谁在说、说了什么、这轮用户的输入是什么
@@ -309,6 +333,14 @@ async def realtime_session(sock):
                         if turn["live"]:
                             turn["reply"] += ev.delta
                             await sock.send_json({"type": "answer_delta", "text": ev.delta})
+                    elif t == "error" or t.endswith(".error"):
+                        print(f"[web] realtime 事件错误：{getattr(ev, 'error', ev)}", flush=True)
+                    elif t.endswith("input_audio_buffer.speech_started"):
+                        # OpenAI 的 VAD 听到人声：它那侧已经掐了回复，我们同步收尾
+                        if turn["live"]:
+                            turn["live"] = False
+                            await sock.send_json({"type": "answer_interrupt"})
+                            close_turn()
                     elif t.endswith("response.done") or t.endswith("response.cancelled"):
                         if turn["live"]:
                             await sock.send_json({"type": "answer_done"})
