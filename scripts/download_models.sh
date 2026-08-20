@@ -13,9 +13,11 @@ mkdir -p "${DEST}"
 REL="https://github.com/k2-fsa/sherpa-onnx/releases/download"
 ASR_DIR="sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20"
 
-# 1) 流式 ASR：sherpa-onnx streaming zipformer bilingual zh-en（Apache-2.0，k2-fsa）
+# 1) 回退流式 ASR：sherpa-onnx streaming zipformer bilingual zh-en（Apache-2.0，k2-fsa）
+#    默认流式 ASR 是 FunASR paraformer-zh-streaming，首次运行自动下，不用管这一步；
+#    这个是 VOICEMEM_ASR=sherpa 时用的（中英双语、纯 onnx 不依赖 torch）。
 if [ ! -d "${DEST}/${ASR_DIR}" ]; then
-  echo "[1/4] 流式 ASR ${ASR_DIR} …"
+  echo "[1/4] 回退流式 ASR ${ASR_DIR} …"
   curl -L "${REL}/asr-models/${ASR_DIR}.tar.bz2" | tar xj -C "${DEST}"
 fi
 

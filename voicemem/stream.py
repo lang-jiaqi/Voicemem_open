@@ -5,7 +5,7 @@
 
     stream = vm.stream(on_partial=lambda t: print(t))
 
-    # ① 喂音频块：voicemem 自带 sherpa ASR + silero VAD
+    # ① 喂音频块：voicemem 自带流式 ASR（FunASR paraformer）+ silero VAD
     st = await stream.feed(pcm_bytes)          # PCM16 @ src_rate（默认 24k）
 
     # ② 喂【外部 ASR】的 partial 文本（FunASR / Whisper / 任意）——换 ASR 只改喂进来的这行
@@ -58,7 +58,7 @@ class VoiceStream:
     """核心流式输入会话：边喂边投机，说完时交出 Turn。
 
     ``vm.stream(on_partial=None, spec_min_chars=6, gamble_s=0.2, confirm_s=0.5,
-    src_rate=24000)``。``feed`` 走内置 sherpa ASR + silero VAD；``feed_partial``
+    src_rate=24000)``。``feed`` 走内置流式 ASR + silero VAD；``feed_partial``
     接外部 ASR 的文本（换 ASR 只改喂进来的一行）。投机预取逻辑两者共用。
     """
 
@@ -125,9 +125,14 @@ class VoiceStream:
 
     async def _confirm(self) -> Turn:
         try:
-            return await (self._spec or self._speculate(self._text))
+            turn = await (self._spec or self._speculate(self._text))
         except asyncio.CancelledError:
-            return await self._speculate(self._text)
+            turn = await self._speculate(self._text)
+        # flush() 可能补出投机时还没解码出来的尾字：文本以最终版为准，记忆沿用已预取
+        # 的结果（差的是最后几个字，为它重跑一次 Search 就把投机的收益还回去了）。
+        if turn.text != self._text:
+            turn = Turn(self._text, turn.result)
+        return turn
 
     def _reset_turn(self):
         if self._asr is not None:
@@ -159,7 +164,7 @@ class VoiceStream:
         return StreamState("<speak>" if new else "<silence>", self._text, self._ready_memory(), None)
 
     async def feed(self, pcm_bytes) -> StreamState:
-        """喂一块 PCM16（``src_rate``，默认 24k）：内置 sherpa ASR + silero VAD + 投机。
+        """喂一块 PCM16（``src_rate``，默认 24k）：内置流式 ASR + silero VAD + 投机。
         每块返回 ``StreamState``（``<speak>``/``<silence>`` + 当前投机记忆 + 说完时的 Turn）。
         """
         frame = resample(np.frombuffer(pcm_bytes, np.int16).astype(np.float32) / 32768.0,
@@ -180,6 +185,9 @@ class VoiceStream:
                  or self._silence >= self.gamble_s):
             self._kick(self._text)
         if self._spoke and self._silence >= self.confirm_s and self._text.strip():
+            flush = getattr(self._asr, "flush", None)      # 块式 ASR（paraformer）把不足
+            if flush is not None:                          # 一块的尾巴补零吐出来
+                self._text = flush() or self._text
             turn = await self._confirm()                   # VAD 确认说完 → 交出预算记忆
             self._reset_turn()
             return StreamState("<speak>" if speaking else "<silence>", turn.text, None, turn)

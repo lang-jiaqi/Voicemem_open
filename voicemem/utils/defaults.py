@@ -25,9 +25,14 @@ def default_utils(base_url, memory_root):
         from voicemem.utils.audio.voiceprint.speaker_encoder import SpeakerEncoder
         return SpeakerEncoder(device="cpu")
     def asr():
-        from voicemem.utils.audio.asr import StreamingASR
-        d = os.environ.get("VOICEMEM_MODELS_DIR", "models")
-        return StreamingASR(f"{d}/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20")
+        # 默认 FunASR paraformer-zh-streaming（中文更准）；VOICEMEM_ASR=sherpa 回退到
+        # sherpa-onnx 流式 zipformer（中英双语、纯 onnx 不依赖 torch）。
+        if os.environ.get("VOICEMEM_ASR", "funasr").lower() == "sherpa":
+            from voicemem.utils.audio.asr import StreamingASR
+            d = os.environ.get("VOICEMEM_MODELS_DIR", "models")
+            return StreamingASR(f"{d}/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20")
+        from voicemem.utils.audio.asr import FunASRStreamingASR
+        return FunASRStreamingASR()
     def memory_engine():
         from pathlib import Path
         from voicemem.leftbrain.mem0_backend_store import Mem0BackendStore

@@ -1,12 +1,16 @@
 """语音转文字：流式识别（实时 partial）+ 非流式精转写（最终文本）。
 
-来自 demo/live/models.py，原样搬过来，没改逻辑。
+流式两个实现，接口一致（``feed(samples) -> 累积文本`` / ``flush()`` / ``reset()``），
+由 ``utils/defaults.py`` 的 ``asr`` 工厂按 ``VOICEMEM_ASR`` 选：
+
+  · ``FunASRStreamingASR``  FunASR paraformer-zh-streaming（**默认**，中文更准）
+  · ``StreamingASR``        sherpa-onnx 流式 zipformer（中英双语、纯 onnx 无 torch）
 """
 from __future__ import annotations
 
 import re
 
-import sherpa_onnx
+import numpy as np
 
 SAMPLE_RATE = 16000
 
@@ -36,9 +40,10 @@ def pick_device() -> str:
 
 
 class StreamingASR:
-    """sherpa-onnx 流式 zipformer，出实时 partial 文本。"""
+    """sherpa-onnx 流式 zipformer，出实时 partial 文本。``VOICEMEM_ASR=sherpa`` 时启用。"""
 
     def __init__(self, asr_dir: str) -> None:
+        import sherpa_onnx          # 惰性：默认走 FunASR 时不拉 sherpa
         self.rec = sherpa_onnx.OnlineRecognizer.from_transducer(
             tokens=f"{asr_dir}/tokens.txt",
             encoder=f"{asr_dir}/encoder-epoch-99-avg-1.onnx",
@@ -55,8 +60,72 @@ class StreamingASR:
             self.rec.decode_stream(self.stream)
         return self.rec.get_result(self.stream)
 
+    def flush(self) -> str:
+        """接口对齐 FunASRStreamingASR；sherpa 逐帧就把结果吐完了，没有尾巴要补。"""
+        return self.rec.get_result(self.stream)
+
     def reset(self) -> None:
         self.stream = self.rec.create_stream()
+
+
+# ── 默认流式 ASR：FunASR paraformer-zh-streaming ────────────────────────────────
+
+class FunASRStreamingASR:
+    """FunASR ``paraformer-zh-streaming``，出实时 partial 文本（核心默认流式 ASR）。
+
+    paraformer 是**按块**推理的（``chunk_size=[0,10,5]`` → 600ms/块），而
+    ``VoiceStream.feed()`` 喂进来的帧长由调用方决定（web 前端发 20ms 一帧），所以这里
+    内部攒够 600ms 才推一次；``feed()`` 与 sherpa 版语义一致，返回**累积**文本
+    （``VoiceStream`` 是 ``self._text = asr.feed(frame)`` 赋值语义，不能返回增量）。
+
+    ``flush()``：VAD 判说完时由 ``VoiceStream`` 调一次——把不足一块的尾巴补零、跑一次
+    ``is_final=True``，取出解码器 look-ahead 里还没吐的最后几个字。flush 之后若又来
+    音频（说到一半停顿又续上），自动起一条新的子流继续累积，不会把这一轮的文本丢掉。
+    """
+
+    CHUNK_SIZE = [0, 10, 5]                    # paraformer-streaming 标配
+    STRIDE     = CHUNK_SIZE[1] * 960           # 9600 samples @16k = 600ms
+    LOOK_BACK  = dict(encoder_chunk_look_back=4, decoder_chunk_look_back=1)
+
+    def __init__(self, model: str = "paraformer-zh-streaming", device: str | None = None) -> None:
+        from funasr import AutoModel          # 惰性：只有真用流式 ASR 才拉 funasr
+        self.model = AutoModel(model=model, device=device or pick_device(),
+                               disable_update=True)
+        self.reset()
+
+    def _run(self, samples, is_final: bool) -> str:
+        res = self.model.generate(input=samples, cache=self._cache, is_final=is_final,
+                                  chunk_size=self.CHUNK_SIZE, **self.LOOK_BACK)
+        if res and res[0].get("text"):
+            self._text += res[0]["text"]
+        return self._text
+
+    def feed(self, samples) -> str:
+        """喂任意长度的 16k float32 帧；攒够 600ms 推一块。返回累积文本。"""
+        if self._final:                        # 上一轮 flush 过又来音频 → 起新子流续着攒
+            self._cache, self._final = {}, False
+        self._buf = np.concatenate([self._buf, np.asarray(samples, dtype=np.float32)])
+        while len(self._buf) >= self.STRIDE:
+            self._run(self._buf[:self.STRIDE], False)
+            self._buf = self._buf[self.STRIDE:]
+        return self._text
+
+    def flush(self) -> str:
+        """VAD 判说完时调：尾巴补零跑 is_final=True，别丢最后几个字。幂等。"""
+        if self._final:
+            return self._text
+        tail = self._buf
+        self._buf = np.zeros(0, dtype=np.float32)
+        tail = (np.pad(tail, (0, self.STRIDE - len(tail))) if len(tail)
+                else np.zeros(self.STRIDE, dtype=np.float32))
+        self._final = True
+        return self._run(tail, True)
+
+    def reset(self) -> None:
+        self._cache: dict = {}
+        self._buf = np.zeros(0, dtype=np.float32)
+        self._text = ""
+        self._final = False
 
 
 class Transcriber:

@@ -19,8 +19,9 @@ VoiceMem 每个能力都是**可插拔**的:有内置默认,一行 config 就在
 
 | 能力 | provider | 默认 | 类型 | 模型 / 来源 |
 |---|---|---|---|---|
-| 流式 ASR | `sherpa`(内置) | ✅ | 🟢 Apache | `sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20`（k2-fsa） |
-| 流式 ASR | **外部**（`feed_partial`） | — | 任意 | FunASR / Whisper / 云 ASR —— 换 ASR 只改喂进来的一行 |
+| 流式 ASR | `funasr`(内置) | ✅ | 🟢 MIT | `paraformer-zh-streaming`（FunASR/ModelScope，首次运行自动下） |
+| 流式 ASR | `sherpa`(内置) | — | 🟢 Apache | `sherpa-onnx-streaming-zipformer-bilingual-zh-en`（k2-fsa，中英双语）；`VOICEMEM_ASR=sherpa` |
+| 流式 ASR | **外部**（`feed_partial`） | — | 任意 | Whisper / 云 ASR —— 换 ASR 只改喂进来的一行 |
 | ASR（非流式精转写） | `sensevoice` | — | 🟢 | `FunAudioLLM/SenseVoiceSmall`（锁定一轮时比流式更准） |
 | VAD | `silero`(内置) | ✅ | 🟢 MIT | `silero_vad.onnx` |
 | 声纹 | `3d-speaker`(内置) | ✅ | 🟢 Apache | `3dspeaker_...eres2net...16k.onnx` |
@@ -70,6 +71,6 @@ demo 有两条回复控制流，用 `DEMO_MODE` 切：
 ---
 
 ## 一句话总结
-- **语音感知(ASR/VAD/声纹/场景/情绪)= 纯本地开源**，`download_models.sh` 从 sherpa-onnx 官方拉那 3 个 `.onnx`，其余 HF 自动下。
+- **语音感知(ASR/VAD/声纹/场景/情绪)= 纯本地开源**，`download_models.sh` 从 sherpa-onnx 官方拉 VAD/声纹/回退 ASR 那几个 `.onnx`，默认流式 ASR(paraformer) 与其余模型首次运行自动下。
 - **记忆(embedding/slot/抽取)默认走 OpenAI API，但都有本地开源替代**（E5 / LocalQueryClassifier / 本地 LLM）。
 - **回复(web demo)两种模式**：`llm_tts`（GPT-4o 出字 → TTS 出声）/ `realtime`（GPT Realtime 原生语音）；LLM、TTS 都可换本地。

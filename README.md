@@ -45,7 +45,7 @@ git clone https://github.com/lang-jiaqi/Voicemem_open.git
 cd Voicemem_open
 
 pip install -e ".[demo,audio,environment,voiceprint]"     # 记忆核心 + 音频感知 + 流式
-bash scripts/download_models.sh models                    # sherpa ASR/VAD/声纹 + 本地 E5（HuggingFace）
+bash scripts/download_models.sh models                    # VAD/声纹/回退ASR + 本地 E5（默认 ASR 首次运行自动下）
 export OPENAI_API_KEY=sk-...
 ```
 
@@ -87,6 +87,55 @@ orchestrator.py    编排实现（把三组件串成 Search/Ingest pipeline）
 - **读写分离**：抽取事实、更新摘要、刷新描述等「慢而智能」的 LLM 活儿都在写入侧；读（检索）路径
   0 次 LLM、走本地向量，实测 Search 本体 ~10ms。
 
+## 主业务逻辑：实时对话一轮
+
+麦克风逐帧喂进 `vm.stream()`，说完一轮就拿到 `Turn`——**记忆早在你说话时就查好了**，
+关键路径上只剩回复模型。这就是全部：
+
+```python
+import asyncio, queue
+import numpy as np, sounddevice as sd
+from voicemem import VoiceMem
+
+vm = VoiceMem.from_config({                     # 检索侧全本地 → 投机预取 0 网络
+    "embedding": {"provider": "local"},
+    "slots":     {"provider": "local"},
+})
+stream = vm.stream(on_partial=lambda t: print(f"\r🎙️  {t}", end="", flush=True),
+                   src_rate=16000)
+
+mic_q = queue.Queue()                           # callback 只丢数据，不被生成阻塞
+def on_mic(indata, *_):
+    mic_q.put((np.clip(indata[:, 0], -1, 1) * 32767).astype(np.int16).tobytes())
+
+async def main():
+    loop = asyncio.get_running_loop()
+    with sd.InputStream(samplerate=16000, channels=1, dtype="float32",
+                        blocksize=320, callback=on_mic):        # 20ms 一帧
+        while True:
+            st = await stream.feed(await loop.run_in_executor(None, mic_q.get))
+            if st.turn:                                          # VAD 确认说完
+                reply = your_model(st.turn.memory_context,       # 记忆已就绪，直接用
+                                   st.turn.text)
+                print(f"\n🧑 {st.turn.text}\n🤖 {reply}")
+                vm.ingest(st.turn.text, async_facts=True)        # 存这轮，抽事实走后台
+
+asyncio.run(main())
+```
+
+`stream.feed()` 里发生的事（`voicemem/stream.py`）：
+
+| 时机 | 干什么 |
+|---|---|
+| 说话中、文本 ≥6 字 | 后台起投机 `Search`（本地 E5，0 LLM 0 网络）；文本每变一次就重起 |
+| 静音 200ms | 赌你说完了，补投机一次 |
+| 停顿后又开口 | **barge-in**：取消投机，不误判成一轮 |
+| 静音 500ms | ASR flush 补尾字 → 交出 `Turn`（`.text` / `.result` / `.memory_context`） |
+
+拿到 `Turn` 之后怎么回复，核心不管。`web/` 给了两条现成的（`llm_tts` = LLM 流→TTS 流、
+`realtime` = OpenAI 原生语音）；换成自己的模型见
+[`scripts/realtime_funasr_qwen.py`](scripts/realtime_funasr_qwen.py)（Voicemem-Qwen adapter）。
+
 ## Models
 
 每个能力都**可插拔**——本地开源 ↔ API，一行 config 就切换。完整清单（哪个功能有哪些模型选项）见
@@ -102,22 +151,81 @@ VoiceMem.from_config({"embedding": {"provider": "local"}, "slots": {"provider": 
 
 ## 三种输入接口 <a id="interfaces"></a>
 
-文本 / wav / 流式，三者在核心并列：
+文本 / wav / 流式，三者在核心并列——都是完整可跑的脚本，复制即用。
+
+### ① 文本
 
 ```python
-# ① 文本
-vm.ingest("中午吃了拉面");   vm.search("我中午吃了什么")
+from voicemem import VoiceMem
 
-# ② wav（+ 声学感知：声纹/场景/情绪）
-vm.ingest(text, audio="turn.wav")
-sig = vm.preprocess(text, audio="turn.wav")     # 只拿声学信号、不写记忆
+vm = VoiceMem(api_key="sk-...", mode="text_mode")
 
-# ③ 流式（喂音频块 → 说完得到一轮记忆结果）
-stream = vm.stream(on_partial=cb)
-turn = await stream.feed(pcm_chunk)             # None（还在说）或 Turn(text, result=SearchResult)
-turn = await stream.feed_text("我在哪工作")       # 打字轮
-turn.text / turn.result / turn.memory_context
+vm.ingest("我是素食主义者，对坚果过敏。")
+result = vm.search("我的饮食禁忌是什么？")
+for hit in result.hits:
+    print(hit.text)
 ```
+
+### ② 语音（wav）
+
+```python
+from voicemem import VoiceMem
+
+vm = VoiceMem(api_key="sk-...", mode="multi_modal")
+
+# 存：上游转好的文本 + 音频文件（内部跑声纹/场景/情绪感知）
+vm.ingest("今天在咖啡馆和 Alex 聊了创业。", audio="turn.wav")
+
+# 只拿声学信号、不写记忆
+sig = vm.preprocess("今天在咖啡馆和 Alex 聊了创业。", audio="turn.wav")
+print(sig.speaker, sig.emotion, sig.scene_tag)      # 说话人 / 情绪 / 声学场景
+
+for hit in vm.search("我和 Alex 聊了什么？").hits:
+    print(hit.text)
+```
+
+### ③ 流式（逐块喂音频）
+
+```python
+import asyncio
+import numpy as np
+import soundfile as sf
+from voicemem import VoiceMem
+
+# 统一 config：本地 E5，0 网络
+vm = VoiceMem.from_config({
+    "mode": "multi_modal",
+    "embedding": {"provider": "local"},
+    "slots":     {"provider": "local"},
+})
+
+async def main():
+    audio, sr = sf.read("speech.wav", dtype="float32")     # mono
+    pcm16 = (np.clip(audio, -1, 1) * 32767).astype(np.int16)
+
+    # 边喂边出 partial；VAD 判说完时拿到一轮记忆结果（0–500ms 投机预取、barge-in）
+    stream = vm.stream(on_partial=lambda t: print(f"\r{t}", end="", flush=True), src_rate=sr)
+
+    step = int(sr * 0.6)                                   # 600ms 一块
+    for i in range(0, len(pcm16), step):
+        st = await stream.feed(pcm16[i:i+step].tobytes())  # 每块都返回 StreamState
+        # st.state  "<speak>" | "<silence>"
+        # st.memory 边说边预取到的 SearchResult；还没算好时 None
+        if st.turn:                                        # 一轮说完才非 None
+            print("\n[说完]", st.turn.text)
+            for hit in st.turn.result.hits:
+                print("  记忆:", hit.text)
+
+asyncio.run(main())
+```
+
+> **返回类型**：`feed` / `feed_partial` 每块都返回 **`StreamState`**，一轮说完时
+> `st.turn` 才是 `Turn`（`.text` / `.result` / `.memory_context`）；`feed_text("…")`
+> 是打字轮，直接返回 `Turn`。
+>
+> 接**外部 ASR**（FunASR / Whisper / 云 ASR）就把 ③ 的 `feed` 换成
+> `await stream.feed_partial(累积转写, ended=外部VAD判说完)`——换 ASR 只改喂进来的
+> 那一行。完整示例见 [`scripts/realtime_funasr_qwen.py`](scripts/realtime_funasr_qwen.py)。
 
 ## Demo
 
@@ -136,7 +244,7 @@ VoiceMem 记忆工作流微调的 QLoRA adapter：
 ## Acknowledgements
 
 衷心感谢这些出色的开源项目：[mem0](https://github.com/mem0ai/mem0)（底层向量记忆引擎）、
-[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)（流式 ASR / Silero VAD / 3D-Speaker 声纹）、
+[FunASR](https://github.com/modelscope/FunASR)（流式 ASR paraformer-zh-streaming）、[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)（Silero VAD / 3D-Speaker 声纹 / 回退流式 ASR）、
 [intfloat/multilingual-e5](https://huggingface.co/intfloat/multilingual-e5-small)（本地 embedding 与 slot 分类），
 以及 OpenAI（chat / TTS / Realtime）。
 
