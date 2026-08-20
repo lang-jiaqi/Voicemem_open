@@ -43,8 +43,9 @@ def default_utils(base_url, memory_root):
         # sherpa-onnx 流式 zipformer（中英双语、纯 onnx 不依赖 torch）。
         if os.environ.get("VOICEMEM_ASR", "funasr").lower() == "sherpa":
             from voicemem.utils.audio.asr import StreamingASR
-            from voicemem.utils.common.paths import models_dir
-            return StreamingASR(str(models_dir() / "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20"))
+            from voicemem.utils.common.paths import model_path
+            return StreamingASR(str(model_path(
+                "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20", kind="asr")))
         from voicemem.utils.audio.asr import FunASRStreamingASR
         return FunASRStreamingASR()
     def vad():
