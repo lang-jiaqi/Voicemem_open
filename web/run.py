@@ -334,7 +334,17 @@ async def realtime_session(sock):
                             turn["reply"] += ev.delta
                             await sock.send_json({"type": "answer_delta", "text": ev.delta})
                     elif t == "error" or t.endswith(".error"):
-                        print(f"[web] realtime 事件错误：{getattr(ev, 'error', ev)}", flush=True)
+                        err = getattr(ev, "error", None)
+                        # server_vad 判完一句会自己 commit 音频缓冲，我们随后那次
+                        # commit 就撞上空缓冲。两种情况都得留着手动 commit（说得太短
+                        # 时 server_vad 不会自动 commit），所以这条属于预期内，忽略。
+                        # response_cancel_not_active：打断有两条路（本地 VAD 的
+                        # on_speech + server_vad 的 interrupt_response），互为备份，
+                        # 谁先到算谁的，慢的那个扑空是正常的。
+                        if getattr(err, "code", "") not in (
+                                "input_audio_buffer_commit_empty",
+                                "response_cancel_not_active"):
+                            print(f"[web] realtime 事件错误：{err or ev}", flush=True)
                     elif t.endswith("input_audio_buffer.speech_started"):
                         # OpenAI 的 VAD 听到人声：它那侧已经掐了回复，我们同步收尾
                         if turn["live"]:
