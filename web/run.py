@@ -119,9 +119,12 @@ async def voicemem_llm_tts(pending, send, send_audio):
         reply += d
         await send({"type": "answer_delta", "text": d})
     await send({"type": "answer_done"})
+    # 先落记忆再放语音：ingest 排在 send_audio 后面的话，用户一听完就关页面
+    # （语音场景很常见），send_audio 抛 WebSocketDisconnect，这一轮就永远存不进去。
+    # async_facts=True：抽事实走后台，不堵住读麦克风那条线。
+    vm.ingest(pending.text, agent_reply=reply, async_facts=True)   # 两半一起存
     async for pcm in utils.tts_stream(reply, REPLY):
         await send_audio(pcm)
-    vm.ingest(pending.text, agent_reply=reply)       # 两半一起存：agent 说的这句也进记忆
 
 
 async def voicemem_realtime(pending, conn, send, send_audio):
@@ -146,7 +149,7 @@ async def voicemem_realtime(pending, conn, send, send_audio):
             await send({"type": "answer_delta", "text": ev.delta})
         elif t.endswith("response.done"):                  break
     await send({"type": "answer_done"})
-    vm.ingest(pending.text, agent_reply=reply)       # 两半一起存：agent 说的这句也进记忆
+    vm.ingest(pending.text, agent_reply=reply, async_facts=True)   # 两半一起存，抽事实走后台
 
 
 # ══════════════════ 驱动 voicemem 核心流式会话（vm.stream()）══════════════════
