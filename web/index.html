@@ -1053,6 +1053,10 @@ window.brainAdd = function(side, kind, label, slot){
   // ---- playback（复用 orb.html 机制）----
   function playPcm(buf){
     if(!playCtx) playCtx=new (window.AudioContext||window.webkitAudioContext)();
+    // PCM16 一个样本 2 字节；奇数长度的 buffer 直接 new Int16Array 会抛 RangeError，
+    // 外面那个 catch 一吞就是整块音频没了。服务端已按样本边界切好，这里再兜一道。
+    if(buf.byteLength & 1) buf = buf.slice(0, buf.byteLength - 1);
+    if(!buf.byteLength) return;
     const i16=new Int16Array(buf), f32=new Float32Array(i16.length);
     for(let i=0;i<i16.length;i++) f32[i]=i16[i]/32768;
     const b=playCtx.createBuffer(1,f32.length,SAMPLE_RATE); b.copyToChannel(f32,0);
@@ -1117,7 +1121,7 @@ window.brainAdd = function(side, kind, label, slot){
         reject(new Error('ws closed '+ev.code));
       };
       ws.onerror=()=>{ console.warn('[voice] ws error'); };
-      ws.onmessage=ev=>{ if(ev.data instanceof ArrayBuffer){ try{playPcm(ev.data);}catch(e){} return; } handle(JSON.parse(ev.data)); };
+      ws.onmessage=ev=>{ if(ev.data instanceof ArrayBuffer){ try{playPcm(ev.data);}catch(e){console.warn('[audio] 丢帧',e);} return; } handle(JSON.parse(ev.data)); };
     });
   }
 

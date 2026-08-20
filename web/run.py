@@ -238,5 +238,15 @@ app = utils.build_app(MODE, realtime_session if MODE == "realtime" else llm_tts_
 if __name__ == "__main__":
     print(f"[web] mode={MODE} spec≥{SPEC_MIN_CHARS}字 gamble={ARGS.gamble_ms}ms "
           f"confirm={ARGS.confirm_ms}ms -> http://localhost:{ARGS.port}/", flush=True)
-    vm.classify("你好")                                       # 预热本地 E5，第一轮就快
+    # 全部预热在这儿做完，别让第一句话去等模型加载。ASR(FunASR paraformer)
+    # 是懒加载的，等用户开口才拉起来要好几秒——那几秒的音频堆在 socket 缓冲里，
+    # 追赶时逐帧喂 VAD，静音会瞬间累计过 confirm_ms，第一句直接被截断（听感就是
+    # "第一句又慢又不准"）。
+    vm.classify("你好")                                       # 本地 E5
+    print("[web] 预热 ASR / VAD …", flush=True)
+    import numpy as _np
+    vm.utils.get("asr").feed(_np.zeros(9600, dtype=_np.float32))   # 拉起模型并跑一块
+    vm.utils.get("asr").reset()
+    vm.utils.get("vad").is_speech(_np.zeros(512, dtype=_np.float32))
+    print("[web] 就绪", flush=True)
     uvicorn.run(app, host=ARGS.host, port=ARGS.port)

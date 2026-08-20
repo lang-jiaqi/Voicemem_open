@@ -60,12 +60,25 @@ async def llm_stream(text, ctx, reply=None):
 
 async def tts_stream(text, reply=None):
     """可切换 TTS：默认走 OpenAI api；reply.tts.provider==local（或 TTS_BACKEND=local）
-    走离线本地小模型。两条都吐 24kHz PCM16 流，前端一视同仁播放。"""
+    走离线本地小模型。两条都吐 24kHz PCM16 流，前端一视同仁播放。
+
+    **按样本边界切块**：http 流是按网络包切的，实测 69 块里 62 块是奇数字节，而
+    PCM16 一个样本占 2 字节——前端 ``new Int16Array(buf)`` 撞上奇数 byteLength 直接
+    抛 RangeError，被 catch 吞掉，那一整块音频就没了。九成块被丢，听感就是滋滋声。
+    这里把跨块的半个样本留到下一块，保证吐出去的每块都是完整样本。
+    """
     provider, cfg = _reply_seg(reply, "tts")
     backend_name = provider or TTS_BACKEND          # 对齐现有 TTS_BACKEND 语义
     backend = _local_tts_stream if backend_name == "local" else _openai_tts_stream
+    tail = b""
     async for chunk in backend(text, cfg.get("model")):
-        yield chunk
+        buf = tail + chunk
+        cut = len(buf) & ~1                         # 向下取到偶数
+        tail = buf[cut:]
+        if cut:
+            yield buf[:cut]
+    if tail:
+        yield tail + b"\x00"                        # 收尾那半个样本补齐
 
 
 async def _openai_tts_stream(text, model=None):
