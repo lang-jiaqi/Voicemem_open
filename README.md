@@ -40,16 +40,28 @@
 
 ### 安装
 
+装哪档，看你要用哪个入口——和下面「三种输入接口」一一对应：
+
 ```bash
 git clone https://github.com/lang-jiaqi/Voicemem_open.git
 cd Voicemem_open
-
-pip install -e ".[demo,audio,environment,voiceprint]"     # 记忆核心 + 音频感知 + 流式
-bash scripts/download_models.sh models                    # VAD / 声纹 / 回退 ASR + 本地 E5
 export OPENAI_API_KEY=sk-...
+
+pip install -e ".[text]"      # ① 文本
+pip install -e ".[wav]"       # ② wav：+ 声纹 / 声学场景 / 情绪
+pip install -e ".[stream]"    # ③ 流式：+ 流式 ASR / VAD / 投机预取
+pip install -e ".[all]"       # 三个都要
 ```
 
-> 只想先用纯文本（下面的 ①）？`pip install -e ".[demo]"` 就够，一个模型都不用下。
+② ③ 还要下本地模型（silero VAD 那份没有自动下载兜底）：
+
+```bash
+bash scripts/download_models.sh models
+```
+
+> `-e` 是可编辑安装——还没发 PyPI，所以从 clone 装。
+> `[wav]` 和 `[stream]` 是**并列**的，不是递进：wav 的文本由上游 ASR 转好，所以不装 ASR；
+> 流式自带 ASR，但不装声纹/场景。两个都要就 `[all]`。
 
 ### 默认配置
 
@@ -207,6 +219,29 @@ async def main():
 asyncio.run(main())
 ```
 
+### 回复：两条路
+
+上面那行 `vm.reply()` 走的是内置 provider。换成自己的模型就多一个参数——两条路的
+调用口完全一样（`voicemem/reply.py`）：
+
+```python
+vm = VoiceMem(reply=my_fn)                                  # 路 B：自己的模型/函数
+vm = VoiceMem.from_config({"reply": {"provider": "openai",  # 路 A：内置（OpenAI 兼容）
+                                     "config": {"model": "gpt-4o-mini"}}})
+
+answer = await vm.reply(turn)                     # 收全，返回整串（在 async 函数里）
+async for delta in vm.reply_stream(turn):         # 流式，逐字吐
+    ...
+```
+
+`my_fn(text, memory_context)` 写成同步函数、协程、异步生成器都行，核心自己适配——
+**同步函数会丢进 `asyncio.to_thread`**，不会卡住读麦克风那条线。`vm.reply()` 可以直接
+吃 `Turn`（自动拆 `.text` / `.memory_context`），也可以 `vm.reply("我饿了", ctx)`。
+
+> **TTS 不在核心里**：回复层只产出文本，语音合成仍只在 web demo（`web/utils.py` 的
+> `tts_stream`）。`reply` config 用 demo 那份 `{"llm","tts","realtime"}` 嵌套写法时，
+> 核心只取 `llm`。
+
 ## Models
 
 每个能力都**可插拔**——本地开源 ↔ API，一行 config 就切换。完整清单（哪个功能有哪些模型选项）见
@@ -241,7 +276,8 @@ ASR 还能整个换掉：`VOICEMEM_ASR=sherpa` 切回 sherpa-onnx，或用
 
 ## Demo
 
-**[`web/`](web/)** —— 单一极简 demo：`run.py`（对话核心）+ `utils.py`（管道）+ 脑图 `index.html`。
+**[`web/`](web/)**（`pip install -e ".[web]"`）—— 单一极简 demo：`run.py`（对话核心）+
+`utils.py`（管道）+ 脑图 `index.html`。
 本地 ASR + VAD 边听边算，VAD 确认说完时记忆早已在关键路径外投机预取好，两条回复控制流
 （`llm_tts` = GPT 流→TTS 流 / `realtime` = OpenAI Realtime 原生语音）拿去回复。WebSocket 协议见
 [docs/PROTOCOL.md](docs/PROTOCOL.md)。

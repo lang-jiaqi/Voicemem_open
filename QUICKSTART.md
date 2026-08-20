@@ -5,12 +5,12 @@
 ```bash
 cd voicemem_opensource
 export OPENAI_API_KEY=sk-...                # 你的 key
-pip install -e ".[demo,audio,environment,voiceprint]"   # demo 依赖（FunASR 流式 ASR + silero VAD + 本地 E5）
-bash scripts/download_models.sh models      # ASR/VAD/声纹模型（从 HuggingFace 断点续传）
-# 本地 E5 记忆/投机模型（intfloat/multilingual-e5-small）首次运行自动下，无需手动
+pip install -e ".[web]"                     # 三个入口全套 + demo 服务器
+bash scripts/download_models.sh models      # VAD/声纹/回退ASR（k2-fsa 官方 release）
+# 默认流式 ASR（FunASR paraformer）和本地 E5 首次运行自动下，无需手动
 ```
 
-> 只想先用「打字」测试、不下语音模型？跑 `pip install -e ".[demo]"` 即可
+> 只想先用「打字」测试、不下语音模型？跑 `pip install -e ".[text]" fastapi uvicorn` 即可
 > （语音识别用不了，但打字通道能跑通记忆 + 脑图 + 回复）。
 
 > 换过 demo？本版把记忆向量换成**本地 384 维 E5**（投机预取的 0–500ms 预算内不能走网络）。
