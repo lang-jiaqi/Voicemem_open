@@ -192,20 +192,6 @@ async def main():
 
 asyncio.run(main())
 ```
-
-`stream.feed()` 里发生的事（`voicemem/stream.py`）：
-
-| 时机 | 干什么 |
-|---|---|
-| 说话中、文本 ≥6 字 | 后台起投机 `Search`（本地 E5，0 LLM 0 网络）；文本每变一次就重起 |
-| 静音 200ms | 赌你说完了，补投机一次 |
-| 停顿后又开口 | **barge-in**：取消投机，不误判成一轮 |
-| 静音 500ms | ASR flush 补尾字 → 交出 `Turn`（`.text` / `.result` / `.memory_context`） |
-
-拿到 `Turn` 之后怎么回复，核心不管。`web/` 给了两条现成的（`llm_tts` = LLM 流→TTS 流、
-`realtime` = OpenAI 原生语音）；换成自己的模型见
-[`scripts/realtime_funasr_qwen.py`](scripts/realtime_funasr_qwen.py)（Voicemem-Qwen adapter）。
-
 ## Models
 
 每个能力都**可插拔**——本地开源 ↔ API，一行 config 就切换。完整清单（哪个功能有哪些模型选项）见
