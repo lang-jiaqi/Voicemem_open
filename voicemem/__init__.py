@@ -8,6 +8,7 @@ ASTEnvironmentDetector 等）依赖 torch / sherpa-onnx，所以采用惰性加�
 
 分组一览：
   · 核心          VoiceMem / SearchResult / RightBrainHit / AudioPerception
+  · 回复（输出侧） openai_reply / normalize_reply（见 voicemem/reply.py）
   · 语音接入适配   VoiceInput / VoiceContent / VoiceprintRegistry / ingest_voice_input …
   · 音频原生感知   SpeakerEncoder / *EnvironmentDetector / Scene* / Music/Place/Routine …
   · 右脑情绪层     EmotionLayer / EmotionLayerConfig / EmotionLayerResult
@@ -34,6 +35,8 @@ _LAZY: dict[str, str] = {
     "RightBrainHit":            "voicemem.rightbrain.brain:RightBrainHit",
     "AudioPerception":          "voicemem.utils.audio.perceiver:AudioPerception",
     "VoiceStream":              "voicemem.stream:VoiceStream",
+    "openai_reply":             "voicemem.reply:openai_reply",
+    "normalize_reply":          "voicemem.reply:normalize",
     "Turn":                     "voicemem.stream:Turn",
     "StreamState":              "voicemem.stream:StreamState",
 

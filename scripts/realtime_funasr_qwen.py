@@ -13,6 +13,10 @@
 所以 Search 不在关键路径上：VAD 一确认说完，``turn.result`` 已经是算好的，
 唯一还要等的就是回复模型。
 
+回复走核心的回复层（``voicemem/reply.py``）的「路 B」：把自己的模型写成一个
+``(text, memory_context) -> str`` 的函数传给 ``reply=``，之后 ``await vm.reply(turn)``
+就行——同步函数核心会自动丢线程，不阻塞读麦克风。
+
 装：pip install funasr sounddevice transformers peft torch
 用法（仓库根目录）：
     export OPENAI_API_KEY=sk-...        # ingest 的事实抽取用（检索侧已全本地）
@@ -41,16 +45,7 @@ from voicemem import VoiceMem  # noqa: E402
 SR    = 16000
 FRAME = 320                                    # 20ms/帧，和 web 前端一致（核心自己攒块）
 
-# ── ① 记忆核心：FunASR 流式 ASR + silero VAD + 0–500ms 投机预取，全在 vm.stream() 里 ──
-vm = VoiceMem.from_config({
-    "mode":      "text_mode",                  # 只存文本；stream 的 ASR 照常加载
-    "embedding": {"provider": "local"},        # 记忆向量走本地 E5 —— 投机预算内不能走网络
-    "slots":     {"provider": "local"},        # slot 分类走本地 E5（0 LLM）
-})
-stream = vm.stream(on_partial=lambda t: print(f"\r🎙️  {t}", end="", flush=True),
-                   src_rate=SR)
-
-# ── ② 回复模型：Voicemem QLoRA adapter ─────────────────────────────────────────
+# ── ① 回复模型：Voicemem QLoRA adapter（回复层的「路 B」：自己的模型）───────────
 # 35B bf16 ≈ 70GB 显存；不够就用 BitsAndBytesConfig(load_in_4bit=True,
 # bnb_4bit_quant_type="nf4") 加载 base（也和 adapter 的训练配置对齐）。
 BASE    = "Qwen/Qwen3.6-35B-A3B"
@@ -60,15 +55,31 @@ base  = AutoModelForCausalLM.from_pretrained(BASE, dtype=torch.bfloat16, device_
 model = PeftModel.from_pretrained(base, ADAPTER).eval()
 
 
-def our_model_reply(ctx: str, user_text: str) -> str:
-    """ctx = turn.memory_context，说话期间就检索好了，这里直接当 system prompt 用。"""
+def our_model_reply(text: str, memory_context: str = "") -> str:
+    """回复层的函数签名就是 ``(text, memory_context)``——见 voicemem/reply.py。
+
+    memory_context 在你说话期间就检索好了，这里直接当 system prompt 用。这是个**同步**
+    函数，核心会自动把它丢进 asyncio.to_thread，不会卡住读麦克风那条线。
+    """
     prompt = tok.apply_chat_template(
-        [{"role": "system", "content": ctx}, {"role": "user", "content": user_text}],
+        [{"role": "system", "content": memory_context}, {"role": "user", "content": text}],
         tokenize=False, add_generation_prompt=True)
     ids = tok(prompt, return_tensors="pt").to(model.device)
     with torch.inference_mode():
         out = model.generate(**ids, max_new_tokens=200, do_sample=True, temperature=0.7)
     return tok.decode(out[0][ids.input_ids.shape[1]:], skip_special_tokens=True).strip()
+
+
+# ── ② 记忆核心：FunASR 流式 ASR + silero VAD + 0–500ms 投机预取，全在 vm.stream() 里 ──
+vm = VoiceMem.from_config({
+    "mode":      "text_mode",                  # 只存文本；stream 的 ASR 照常加载
+    "embedding": {"provider": "local"},        # 记忆向量走本地 E5 —— 投机预算内不能走网络
+    "slots":     {"provider": "local"},        # slot 分类走本地 E5（0 LLM）
+    "reply":     {"provider": "custom",        # 回复走上面那个函数（等价于 VoiceMem(reply=fn)）
+                  "config": {"fn": our_model_reply}},
+})
+stream = vm.stream(on_partial=lambda t: print(f"\r🎙️  {t}", end="", flush=True),
+                   src_rate=SR)
 
 
 # ── ③ 麦克风：callback 只往队列丢，永远不被生成/写记忆阻塞 ─────────────────────
@@ -83,8 +94,8 @@ def _mic_cb(indata, frames, time_info, status):
 
 
 async def on_turn(turn):
-    """一轮说完：记忆早在说话期间预取好了（turn.memory_context），直接拿来生成。"""
-    answer = await asyncio.to_thread(our_model_reply, turn.memory_context, turn.text)
+    """一轮说完：记忆早在说话期间预取好了，vm.reply(turn) 自动拆 text/memory_context。"""
+    answer = await vm.reply(turn)
     print(f"\n🧑 {turn.text}\n🤖 {answer}\n", flush=True)
     threading.Thread(                          # 存这轮：事实抽取扔后台，不挡下一轮
         target=lambda: vm.ingest(turn.text, async_facts=True), daemon=True).start()

@@ -29,20 +29,10 @@ client = AsyncOpenAI()
 
 
 # ── 音频小工具 ────────────────────────────────────────────────────────────────
-def resample(f32, src=24000, dst=16000):        # 脑图 html 发 24k，流式 ASR 要 16k
-    n = int(len(f32) * dst / src)
-    return np.interp(np.arange(n) * src / dst, np.arange(len(f32)), f32).astype(np.float32)
-
-
-def make_vad():
-    import sherpa_onnx
-    d = os.environ.get("VOICEMEM_MODELS_DIR", "../models")
-    v = sherpa_onnx.VoiceActivityDetector(sherpa_onnx.VadModelConfig(
-        silero_vad=sherpa_onnx.SileroVadModelConfig(model=f"{d}/silero_vad.onnx", threshold=0.5),
-        sample_rate=16000), buffer_size_in_seconds=30)
-    class _V:
-        def is_speech(self, frame): v.accept_waveform(frame); return v.is_speech_detected()
-    return _V()
+# resample 用核心那份（voicemem/utils/audio/stream_io.py），别再抄一遍。
+# 原来这里还有一份 make_vad()——自从 demo 改成复用 vm.stream() 之后就没人调了，
+# VAD 现在是核心的可注入能力（VoiceMem(vad=...) / config 的 vad 段），已删。
+from voicemem.utils.audio.stream_io import resample  # noqa: E402,F401
 
 
 # ── 回复模型也在一处配：统一 config 的 reply 段（run.py 从 CONFIG["reply"] 传入）──

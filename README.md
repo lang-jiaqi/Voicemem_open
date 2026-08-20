@@ -39,34 +39,49 @@
 ## Quick Start
 
 ### 安装
+
 ```bash
 git clone https://github.com/lang-jiaqi/Voicemem_open.git
 cd Voicemem_open
 
 pip install -e ".[demo,audio,environment,voiceprint]"     # 记忆核心 + 音频感知 + 流式
-bash scripts/download_models.sh models                    # VAD/声纹/回退ASR + 本地 E5（默认 ASR 首次运行自动下）
+bash scripts/download_models.sh models                    # VAD / 声纹 / 回退 ASR + 本地 E5
 export OPENAI_API_KEY=sk-...
 ```
 
-> 只想纯文本试用、不下语音模型？`pip install -e ".[demo]"` 即可（打字通道能跑通记忆 + 回复）。
+> 只想先用纯文本（下面的 ①）？`pip install -e ".[demo]"` 就够，一个模型都不用下。
+
+### 默认配置
+
+装完不用配任何东西，开箱就是这一套：
+
+| 能力 | 默认 | 跑在哪 |
+|---|---|---|
+| 流式 ASR | FunASR `paraformer-zh-streaming` | 本地，首次运行自动下 |
+| VAD（判「说完了」） | silero | 本地，`download_models.sh` 下 |
+| 记忆向量 | `text-embedding-3-small` | OpenAI API |
+| slot 分类 | 本地 E5 余弦（0 LLM） | 本地 |
+| 回复 | `gpt-4o-mini` | OpenAI API |
+| 声纹 / 声学场景 / 情绪 | 3D-Speaker / AST / 声学启发式 | 本地 |
+
+每一项都能换成本地模型或你自己的——但**先按默认跑通再说**，换法见 [Models](#models)。
 
 ### 三种输入接口 <a id="interfaces"></a>
 
-文本 / wav / 流式，三者在核心并列——都是完整可跑的脚本，复制即用。
+文本 / wav / 流式，三者在核心并列。① 复制就能跑；② ③ 把 `turn.wav` / `speech.wav`
+换成你自己的音频（16k mono 最省事，其它采样率 `src_rate` 会自动重采样）。
 
 **① 文本**
 
 ```python
 from voicemem import VoiceMem
 
-vm = VoiceMem(api_key="sk-...", mode="text_mode")
+vm = VoiceMem(mode="text_mode")               # 读上面 export 的 OPENAI_API_KEY
 
 vm.ingest("我是素食主义者，对坚果过敏。")
 result = vm.search("我的饮食禁忌是什么？")     # 左右脑一起检索
 for hit in result.hits:
     print(hit.text)
-
-vm.left_brain.search("我的饮食禁忌是什么？")    # 只要左脑事实、更快
 ```
 
 **② 语音（wav）**
@@ -74,7 +89,7 @@ vm.left_brain.search("我的饮食禁忌是什么？")    # 只要左脑事实�
 ```python
 from voicemem import VoiceMem
 
-vm = VoiceMem(api_key="sk-...", mode="multi_modal")
+vm = VoiceMem(mode="multi_modal")             # 读上面 export 的 OPENAI_API_KEY
 
 # 存：上游转好的文本 + 音频文件（内部跑声纹/场景/情绪感知）
 vm.ingest("今天在咖啡馆和 Alex 聊了创业。", audio="turn.wav")
@@ -185,13 +200,13 @@ async def main():
         while True:
             st = await stream.feed(await loop.run_in_executor(None, mic_q.get))
             if st.turn:                                          # VAD 确认说完
-                reply = your_model(st.turn.memory_context,       # 记忆已就绪，直接用
-                                   st.turn.text)
-                print(f"\n🧑 {st.turn.text}\n🤖 {reply}")
+                answer = await vm.reply(st.turn)                 # 记忆已就绪，直接生成
+                print(f"\n🧑 {st.turn.text}\n🤖 {answer}")
                 vm.ingest(st.turn.text, async_facts=True)        # 存这轮，抽事实走后台
 
 asyncio.run(main())
 ```
+
 ## Models
 
 每个能力都**可插拔**——本地开源 ↔ API，一行 config 就切换。完整清单（哪个功能有哪些模型选项）见
@@ -199,11 +214,30 @@ asyncio.run(main())
 
 - **语音感知**(ASR / VAD / 声纹 / 声学场景) = **纯本地开源**（`bash scripts/download_models.sh models` 从官方拉）;
 - **记忆**(embedding / slot 分类 / 事实抽取) = **默认 OpenAI API，但都有本地开源替代**（E5 / 本地分类器 / 本地 LLM）;
-- **回复**(对话 LLM / TTS / Realtime) = demo 层，LLM/TTS 可本地可 API，Realtime 目前仅 OpenAI。
+- **回复**(对话 LLM) = **核心能力**，内置 OpenAI 兼容 provider，`VoiceMem(reply=fn)` 换自己的；
+  TTS / Realtime 仍在 demo 层（TTS 可本地可 API，Realtime 目前仅 OpenAI）。
 
 ```python
-VoiceMem.from_config({"embedding": {"provider": "local"}, "slots": {"provider": "local"}})   # 记忆全本地
+# 一个 dict 配齐：记忆全本地（0 网络），VAD 调阈值
+vm = VoiceMem.from_config({
+    "embedding": {"provider": "local"},          # 本地 E5
+    "slots":     {"provider": "local"},          # 本地分类器，0 LLM
+    "vad":       {"provider": "silero", "config": {"threshold": 0.6}},
+})
+vm = VoiceMem(reply=my_fn, vad=lambda: MyVad())  # 或者直接注入函数/对象
 ```
+
+**哪些模型必须下。** `download_models.sh` 下四样，只有 VAD 那份没有自动下载兜底：
+
+| 下的东西 | 谁在用 | 不下行不行 |
+|---|---|---|
+| `silero_vad.onnx` | `vm.stream()` 判「说完了」 | 不下就得注入自己的 VAD（`VoiceMem(vad=…)`） |
+| sherpa 回退 ASR | 只在 `VOICEMEM_ASR=sherpa` 时 | 行，默认 ASR 首次运行自动下 |
+| 3D-Speaker 声纹 | `multi_modal` 的声纹识别 | 行，不开声纹就用不到 |
+| 本地 E5 | `provider: "local"` 的 embedding / slots | 行，首次运行自动下；这步只是预拉方便离线 |
+
+ASR 还能整个换掉：`VOICEMEM_ASR=sherpa` 切回 sherpa-onnx，或用
+[`feed_partial`](#interfaces) 接任意外部 ASR（Whisper / 云 ASR）。
 
 ## Demo
 

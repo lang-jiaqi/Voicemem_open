@@ -36,6 +36,9 @@ __all__ = ["VoiceMem", "SearchResult", "Utils"]
 class VoiceMem:
     """顶层门面：左脑 + 右脑 + utils（一眼看懂系统）。实现见 orchestrator.py。
 
+    输入侧 ``stream()`` → ``Turn``（voicemem/stream.py），输出侧 ``reply()`` /
+    ``reply_stream()``（voicemem/reply.py）；``VoiceMem(reply=fn)`` 换成自己的模型。
+
     面向用户的小写便捷方法各自一行委托给内部 ``self._o``（一个 ``Orchestrator``
     实例）；``left_brain`` / ``right_brain`` / ``utils`` 直接指向真组件。构造参数原样
     透传给 ``Orchestrator``：``mode`` 走 mode，能力覆盖（``embedding`` / ``schema`` /
@@ -44,9 +47,13 @@ class VoiceMem:
     """
 
     def __init__(self, api_key=None, mode="text_mode", memory_root=None,
-                 user_id="voice_user", base_url=None, **kw):
+                 user_id="voice_user", base_url=None, reply=None, **kw):
         self._o = Orchestrator(api_key=api_key, mode=mode, memory_root=memory_root,
                                user_id=user_id, base_url=base_url, **kw)
+        # 回复层是门面级的事（编排层只到记忆结果为止），所以 reply 不往下透传。
+        # None → 首次用到时回落到内置 openai provider，见 _reply_fn。
+        self._reply_src = reply
+        self._reply_norm = None
         self.mode = self._o.mode
         self.utils = self._o.utils
         self.left_brain = self._o._left      # 真组件
@@ -83,6 +90,30 @@ class VoiceMem:
         """流式输入途径：喂音频块 / 文字 → 说完时得到 Turn（记忆结果）。见 voicemem/stream.py。"""
         from voicemem.stream import VoiceStream
         return VoiceStream(self, **kw)
+
+    # ── 回复层（输出侧）：两条路一个口子，见 voicemem/reply.py ────────────────────
+
+    def _reply_fn(self):
+        """懒规格化：VoiceMem(reply=fn) 传进来的任意形状 → 统一的异步生成器函数。
+        没传就用内置 openai provider（首次调用才建 client，不传 key 也能 import）。"""
+        if self._reply_norm is None:
+            from voicemem.reply import normalize, openai_reply
+            self._reply_norm = normalize(self._reply_src or openai_reply())
+        return self._reply_norm
+
+    def reply_stream(self, turn_or_text, memory_context=""):
+        """流式回复：``async for delta in vm.reply_stream(turn)``。
+
+        第一个参数可直接给 ``Turn``/``StreamState``（自动拆出 text 与 memory_context），
+        也可以给一段文本 + 自己渲染好的 memory_context。
+        """
+        from voicemem.reply import unpack
+        text, ctx = unpack(turn_or_text, memory_context)
+        return self._reply_fn()(text, ctx)
+
+    async def reply(self, turn_or_text, memory_context=""):
+        """收全的回复：``answer = await vm.reply(turn)``。内部就是把 reply_stream 拼起来。"""
+        return "".join([d async for d in self.reply_stream(turn_or_text, memory_context)])
 
     def test(self):
         """启动自检：只测本 mode 需要的 util，打印 4 档速度表。"""

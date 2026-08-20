@@ -14,16 +14,20 @@
 
         "embedding": {"provider": "local"},                 # 记忆向量走本地 E5
         "slots":     {"provider": "local"},                 # slot 分类走本地 E5（0 LLM）
+        "vad":       {"provider": "silero"},                # 判「说完了」；custom 换自己的
         "memory_engine": {"provider": "mem0"},              # 向量库后端（默认 mem0）
         "llm": {"provider": "openai",                       # 左右脑内部 LLM（打标签/归因…）
                 "config": {"model": "gpt-4o-mini", "api_key": "sk-...", "base_url": None}},
 
-        # reply 段：核心不管，原样保留供 web 读（回复用的 llm/tts/realtime 也在一处配）。
-        "reply": {
-            "llm":      {"provider": "openai", "config": {"model": "gpt-4o"}},
-            "tts":      {"provider": "openai", "config": {"model": "gpt-4o-mini-tts"}},
-            "realtime": {"provider": "openai", "config": {"model": "gpt-realtime"}},
-        },
+        # reply 段：回复模型。两种写法都认——
+        "reply": {"provider": "openai", "config": {"model": "gpt-4o-mini"}},
+        # 或者 demo 那份嵌套写法（web/run.py 用），核心只取其中的 llm 段，
+        # tts / realtime 仍归 web demo 自己读：
+        # "reply": {
+        #     "llm":      {"provider": "openai", "config": {"model": "gpt-4o"}},
+        #     "tts":      {"provider": "openai", "config": {"model": "gpt-4o-mini-tts"}},
+        #     "realtime": {"provider": "openai", "config": {"model": "gpt-realtime"}},
+        # },
     }
 
 provider → 内置实现 的映射（傻瓜清晰，一眼看懂）：
@@ -32,8 +36,12 @@ provider → 内置实现 的映射（傻瓜清晰，一眼看懂）：
                            openai -> OpenAILocalEmbedder（OpenAI Embeddings API）
     slots.provider         local  -> LocalQueryClassifier（本地 E5，0 LLM）
                            openai -> QuerySlotClassifier（单次 LLM）
+    vad.provider           silero -> make_vad（内置，config 可给 model / threshold）
+                           custom -> config.obj 那个对象（要有 is_speech(frame)->bool）
     memory_engine.provider mem0   -> Mem0BackendStore（默认，也可不传走内置默认）
     llm.provider           openai -> 落 OPENAI_MODEL / OPENAI_API_KEY / OPENAI_BASE_URL
+    reply.provider         openai -> voicemem.reply.openai_reply（内置，流式）
+                           custom -> config.fn 里那个可调用对象（等价于 VoiceMem(reply=fn)）
 
 不认识的 provider 会报清晰错误。
 """
@@ -98,6 +106,24 @@ def _slots_factory(provider, cfg):
     _bad("slots", provider, ["local", "openai"])
 
 
+def _vad_factory(provider, cfg):
+    """vad：silero -> 内置 make_vad（可配 model/threshold）；custom -> config.obj 那个对象。"""
+    if provider in (None, "silero"):
+        def make():
+            from voicemem.utils.audio.stream_io import make_vad
+            return make_vad(model=cfg.get("model"), threshold=cfg.get("threshold", 0.5))
+        return make
+    if provider == "custom":
+        obj = cfg.get("obj")
+        if obj is None or not hasattr(obj, "is_speech"):
+            raise ValueError(
+                'vad.provider="custom" 需要 config.obj 给一个有 is_speech(frame)->bool '
+                "的对象；直接注入更省事：VoiceMem(vad=lambda: MyVad())"
+            )
+        return lambda: obj
+    _bad("vad", provider, ["silero", "custom"])
+
+
 def _memory_engine_factory(provider, cfg):
     """memory_engine：mem0 -> Mem0BackendStore（默认，也可不传走内置默认）。"""
     if provider == "mem0":
@@ -107,6 +133,28 @@ def _memory_engine_factory(provider, cfg):
     _bad("memory_engine", provider, ["mem0"])
 
 
+# reply 段的 demo 嵌套写法（web/run.py 的 CONFIG["reply"]）里，这三个是子段名而不是
+# provider/config；核心只认其中的 llm，tts / realtime 归 web demo 自己读。
+_REPLY_DEMO_KEYS = ("llm", "tts", "realtime")
+
+
+def _reply_factory(provider, cfg):
+    """reply：openai -> 内置流式 provider；custom -> 直接用 config.fn 那个函数。"""
+    if provider in (None, "openai"):
+        from voicemem.reply import openai_reply
+        return openai_reply(model=cfg.get("model"), api_key=cfg.get("api_key"),
+                            base_url=cfg.get("base_url"), system=cfg.get("system"))
+    if provider == "custom":
+        fn = cfg.get("fn")
+        if not callable(fn):
+            raise ValueError(
+                'reply.provider="custom" 需要 config.fn 给一个可调用对象；'
+                "直接传函数更省事：VoiceMem(reply=fn)"
+            )
+        return fn
+    _bad("reply", provider, ["openai", "custom"])
+
+
 def build_kwargs(config: dict) -> dict:
     """把统一 config dict 解析成 ``VoiceMem(**kwargs)`` 能吃的注入参数 dict。
 
@@ -114,7 +162,8 @@ def build_kwargs(config: dict) -> dict:
     ``api_key`` / ``base_url`` / ``mode`` + ``embedding`` / ``schema`` /
     ``memory_engine`` 等注入函数（无参工厂，语义同 ``VoiceMem(embedding=lambda: ...)``）。
 
-    ``reply`` 段（web 回复用的 llm/tts/realtime）核心不管，这里忽略。
+    ``reply`` 段解析成 ``VoiceMem(reply=fn)``；demo 那份嵌套写法只取其中的 ``llm``，
+    ``tts`` / ``realtime`` 仍由 web demo 自己读。
     """
     config = config or {}
     kwargs: dict = {}
@@ -141,6 +190,11 @@ def build_kwargs(config: dict) -> dict:
         provider, cfg = _split(config["slots"])
         kwargs["schema"] = _slots_factory(provider, cfg)
 
+    # ── vad：判「说完了」的 VAD（VoiceStream 用）──
+    if "vad" in config:
+        provider, cfg = _split(config["vad"])
+        kwargs["vad"] = _vad_factory(provider, cfg)
+
     # ── memory_engine：mem0 是内置默认，返回 None 就不覆盖 ──
     if "memory_engine" in config:
         provider, cfg = _split(config["memory_engine"])
@@ -164,6 +218,13 @@ def build_kwargs(config: dict) -> dict:
             os.environ["OPENAI_BASE_URL"] = cfg["base_url"]
             kwargs.setdefault("base_url", cfg["base_url"])
 
-    # ── reply 段：核心不管，忽略（供 web 读，见 web/run.py）。──
+    # ── reply：回复模型。两种写法——扁平 {"provider","config"}，或 demo 那份
+    #    {"llm","tts","realtime"} 嵌套（核心只取 llm，tts/realtime 仍由 web 自己读）。──
+    if "reply" in config:
+        seg = config["reply"] or {}
+        if any(k in seg for k in _REPLY_DEMO_KEYS):
+            seg = seg.get("llm") or {}
+        provider, cfg = _split(seg)
+        kwargs["reply"] = _reply_factory(provider, cfg)
 
     return kwargs

@@ -26,7 +26,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from voicemem.memory_api import build_memory_context
-from voicemem.utils.audio.stream_io import make_vad, resample
+from voicemem.utils.audio.stream_io import resample
 
 
 @dataclass
@@ -90,7 +90,7 @@ class VoiceStream:
     @property
     def vad(self):
         if self._vad is None:
-            self._vad = make_vad()
+            self._vad = self.vm.utils.get("vad")   # 可注入：VoiceMem(vad=...) / config 的 vad 段
         return self._vad
 
     # ── 投机预取（本地分类器 + 本地向量 Search，0 LLM/网络，放线程里跟读麦克风并发）──

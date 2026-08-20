@@ -26,14 +26,25 @@ def main() -> None:
 
     # 保留旧的 device 参数兼容性；sherpa-onnx 的 CPU 推理已足够快。
     _device = sys.argv[1] if len(sys.argv) > 1 else "cpu"
-    model_path = os.environ.get(
-        "VOICEMEM_SPEAKER_MODEL",
-        str(
-            __import__("pathlib").Path(__file__).resolve().parents[2]
-            / "models"
-            / "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
-        ),
-    )
+    # 这里是独立子进程（可能跑在另一个 conda 环境里），所以不 import voicemem，
+    # 路径解析逻辑与 voicemem/utils/common/paths.py 保持一致：
+    #   VOICEMEM_SPEAKER_MODEL > VOICEMEM_MODELS_DIR/<name> > 仓库根 models/<name>
+    # 注：旧代码用 parents[2]，那是 voicemem/utils/，指到了一个不存在的目录——
+    # 不设 VOICEMEM_SPEAKER_MODEL 时声纹开箱就找不到模型。仓库根是 parents[4]。
+    from pathlib import Path
+
+    _NAME = "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
+    model_path = os.environ.get("VOICEMEM_SPEAKER_MODEL")
+    if not model_path:
+        _root = os.environ.get("VOICEMEM_MODELS_DIR")
+        _dir = Path(_root) if _root else Path(__file__).resolve().parents[4] / "models"
+        model_path = str(_dir / _NAME)
+    if not Path(model_path).exists():
+        raise FileNotFoundError(
+            f"声纹模型 {_NAME} 找不到：{model_path}\n"
+            f"下载：bash scripts/download_models.sh models\n"
+            f"或用 VOICEMEM_SPEAKER_MODEL / VOICEMEM_MODELS_DIR 指到已有的位置。"
+        )
     extractor = sherpa_onnx.SpeakerEmbeddingExtractor(
         sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=model_path, num_threads=2)
     )
