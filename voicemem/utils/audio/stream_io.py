@@ -20,6 +20,40 @@ def resample(f32, src=24000, dst=16000):        # 脑图 html 发 24k，流式 A
     return np.interp(np.arange(n) * src / dst, np.arange(len(f32)), f32).astype(np.float32)
 
 
+def read_wav(path) -> tuple[np.ndarray, int]:
+    """读音频文件 → (float32 单声道, 采样率)。有 soundfile 就用它（格式全），
+    没有就退回标准库 wave（只认 PCM wav，但不多一个依赖）。"""
+    try:
+        import soundfile as sf
+        audio, sr = sf.read(str(path), dtype="float32")
+        return (audio[:, 0] if audio.ndim > 1 else audio), sr
+    except ImportError:
+        import wave
+        with wave.open(str(path), "rb") as w:
+            sr, n_ch = w.getframerate(), w.getnchannels()
+            pcm = np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) / 32768.0
+        return (pcm[::n_ch] if n_ch > 1 else pcm), sr
+
+
+def transcribe_file(asr, path, chunk_s: float = 0.6) -> str:
+    """用流式 ASR 把整个文件转写成一段文本：分块喂完再 flush 收尾。
+
+    只是把「流式接口」包成「整段接口」，不引入第二套 ASR——ingest(audio=...) 这类
+    一次性调用没必要为此再拉一个非流式模型。
+    """
+    audio, sr = read_wav(path)
+    if sr != 16000:
+        audio = resample(audio, src=sr)
+    asr.reset()
+    step, text = max(1, int(16000 * chunk_s)), ""
+    for i in range(0, len(audio), step):
+        text = asr.feed(audio[i:i + step]) or text
+    flush = getattr(asr, "flush", None)          # 块式 ASR 把不足一块的尾巴补零吐出来
+    if flush is not None:
+        text = flush() or text
+    return (text or "").strip()
+
+
 def make_vad(model: str | None = None, threshold: float = 0.5):
     """内置 VAD：silero（sherpa-onnx 包的）。返回一个只有 ``is_speech(frame)`` 的小对象。
 

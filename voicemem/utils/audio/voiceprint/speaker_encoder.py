@@ -27,7 +27,10 @@ import numpy as np
 
 from voicemem.utils.audio.voiceprint import l2norm
 
-_WORKER_SCRIPT = Path(__file__).resolve().parent / "voiceprint" / "campplus_worker.py"
+# worker 就在本模块旁边。之前多拼了一层 "voiceprint/"（重构搬目录时留下的），
+# 指向一个不存在的文件：子进程起来就退，readline 拿到空串，报成
+# "campplus_worker 启动失败: ''" ——错误信息里连原因都没有，声纹整个不可用。
+_WORKER_SCRIPT = Path(__file__).resolve().parent / "campplus_worker.py"
 _WORKER_PYTHON = os.environ.get("VOICEMEM_AUDIOMEM_PYTHON", sys.executable)
 
 

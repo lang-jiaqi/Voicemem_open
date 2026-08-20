@@ -101,6 +101,20 @@ class SearchResult:
     current_scene: str = ""            # 当前场景 tag，如 "transit"
     timing: dict = None                 # {slot_filter, entity_narrow, rank, rb, total} 单位 ms
 
+    # ── 两个脑各自检索到了什么（面向用户的读法）──────────────────────────────
+    # hits / rb_hits 是带分数和元数据的结构化结果，下面两个是"直接能读能打印"的
+    # 那一层，对应文档里的 result.result_leftbrain / result.result_rightbrain。
+
+    @property
+    def result_leftbrain(self) -> list[str]:
+        """左脑检索到的事实（按相关度排好序）。"""
+        return [h.text for h in self.hits]
+
+    @property
+    def result_rightbrain(self) -> list[str]:
+        """右脑检索到的情感/人格上下文。"""
+        return [h.content for h in self.rb_hits]
+
 
 # 左脑那一整块的候选池构造/救回常量（_RESCUE_K / _POOL_MODE_ENV / _pool_mode /
 # _STRICT_* 等）与 _search_mode 辅助函数随左脑块迁至 voicemem.leftbrain.brain

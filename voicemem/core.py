@@ -46,14 +46,26 @@ class VoiceMem:
     都经 ``**kw`` 透传，语义与 ``Orchestrator.__init__`` 完全一致。
     """
 
+    #: mode 的对外别名 → 内部名。README 用面向用户的说法（"normal" = 全都要，
+    #: "leftbrain_only" = 只要事实记忆），内部名描述的是加载哪套 util。
+    MODE_ALIASES = {
+        "normal":         "multi_modal",
+        "leftbrain_only": "left_brain_single",
+        "text":           "text_mode",
+    }
+
     def __init__(self, api_key=None, mode="text_mode", memory_root=None,
-                 user_id="voice_user", base_url=None, reply=None, **kw):
-        self._o = Orchestrator(api_key=api_key, mode=mode, memory_root=memory_root,
+                 user_id="voice_user", base_url=None, reply=None,
+                 openai_key=None, top_k=5, **kw):
+        self._o = Orchestrator(api_key=api_key or openai_key,
+                               mode=self.MODE_ALIASES.get(mode, mode),
+                               memory_root=memory_root,
                                user_id=user_id, base_url=base_url, **kw)
         # 回复层是门面级的事（编排层只到记忆结果为止），所以 reply 不往下透传。
         # None → 首次用到时回落到内置 openai provider，见 _reply_fn。
         self._reply_src = reply
         self._reply_norm = None
+        self._top_k = top_k                  # search() 的默认取几条
         self.mode = self._o.mode
         self.utils = self._o.utils
         self.left_brain = self._o._left      # 真组件
@@ -80,8 +92,24 @@ class VoiceMem:
 
     # ── 面向用户的便捷方法（各自一行委托给 Orchestrator）─────────────────────────
 
-    def ingest(self, text, audio=None, **kw): return self._o.Ingest(text, audio_path=audio, **kw)
-    def search(self, query, **kw):            return self._o.Search(query, **kw)
+    def ingest(self, text=None, audio=None, **kw):
+        """记一句话。``ingest("文本")`` 存文本；``ingest(audio="x.wav")`` 只给音频时
+        先本地转写再存（同一段音频照样跑声纹/场景/情绪感知）。两个都给就用给的文本。"""
+        if text is None:
+            if audio is None:
+                raise ValueError("ingest() 要么给 text，要么给 audio")
+            text = self.transcribe(audio)
+        return self._o.Ingest(text, audio_path=audio, **kw)
+
+    def transcribe(self, audio) -> str:
+        """把一个音频文件整段转写成文本（复用 utils 里那个流式 ASR，不额外拉模型）。"""
+        from voicemem.utils.audio.stream_io import transcribe_file
+        return transcribe_file(self.utils.get("asr"), audio)
+
+    def search(self, query, **kw):
+        kw.setdefault("top_k", self._top_k)
+        return self._o.Search(query, **kw)
+
     def classify(self, query):                return self._o.Classify(query)
     def preprocess(self, text, audio=None):   return self._o.preprocess(text, audio_path=audio)
     def flush(self):                          return self._o.Flush()
