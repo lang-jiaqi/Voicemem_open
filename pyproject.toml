@@ -62,6 +62,8 @@ voiceprint = [
     "modelscope",
 ]
 # ── 下面按「三个输入接口」分组，上面那些是按单个能力细分的零件 ───────────────
+# 是递进关系：text ⊂ wav ⊂ stream。
+#
 # ① 文本：vm.ingest(text) / vm.search()。基础依赖(numpy/openai/mem0ai)已经能跑，
 #    这里补的是**默认的本地 slot 分类器**（E5 余弦，0 LLM 0 网络，见 defaults.py
 #    的 schema）。同一份 E5 也供 {"embedding": {"provider": "local"}} 复用。
@@ -69,8 +71,8 @@ text = [
     "sentence-transformers",
 ]
 # ② wav：vm.ingest(text, audio=...) / vm.preprocess(...)。文本由上游 ASR 转好，
-#    这里只跑声学感知——声纹（sherpa-onnx 子进程）+ 声学场景（AST）+ 情绪。
-#    **不需要 ASR**。
+#    这里跑的是**语音记忆层**——声纹（sherpa-onnx 子进程）+ 声学场景（AST）+ 情绪。
+#    只要输入是语音模态就该有这一层，跟流不流式无关。
 wav = [
     "voicemem[text]",
     "sherpa-onnx",          # 声纹 3D-Speaker ERes2Net
@@ -79,17 +81,16 @@ wav = [
     "torch",                # 声学场景 AST
     "transformers",
 ]
-# ③ 流式：vm.stream().feed(pcm)。流式 ASR + VAD + 0-500ms 投机预取。
-#    **不需要声纹/场景**（那是 ② 的事，multi_modal 下才按需加载）。
+# ③ 流式：vm.stream().feed(pcm)。在 ② 的语音记忆层之上，再加自带的流式 ASR 与
+#    分轮 VAD（silero 走 sherpa-onnx，已在 wav 里）。
 stream = [
-    "voicemem[text]",
+    "voicemem[wav]",
     "funasr",               # 默认流式 ASR paraformer-zh-streaming
     "modelscope",
-    "sherpa-onnx",          # silero VAD 判「说完了」+ VOICEMEM_ASR=sherpa 回退 ASR
 ]
-# 三个入口都要
+# 全套 = 流式那档（它已经含 text 和 wav）
 all = [
-    "voicemem[wav,stream]",
+    "voicemem[stream]",
 ]
 # web/ 脑图 demo 的服务器。**只是个 demo**，用 voicemem 本身不需要它。
 web = [

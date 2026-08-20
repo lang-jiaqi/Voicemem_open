@@ -40,28 +40,18 @@
 
 ### 安装
 
-装哪档，看你要用哪个入口——和下面「三种输入接口」一一对应：
-
 ```bash
 git clone https://github.com/lang-jiaqi/Voicemem_open.git
 cd Voicemem_open
+
+pip install -e ".[all]"                      # 三个输入接口全套
+bash scripts/download_models.sh models       # 本地模型（silero VAD 没有自动下载兜底）
 export OPENAI_API_KEY=sk-...
-
-pip install -e ".[text]"      # ① 文本
-pip install -e ".[wav]"       # ② wav：+ 声纹 / 声学场景 / 情绪
-pip install -e ".[stream]"    # ③ 流式：+ 流式 ASR / VAD / 投机预取
-pip install -e ".[all]"       # 三个都要
 ```
 
-② ③ 还要下本地模型（silero VAD 那份没有自动下载兜底）：
-
-```bash
-bash scripts/download_models.sh models
-```
-
-> `-e` 是可编辑安装——还没发 PyPI，所以从 clone 装。
-> `[wav]` 和 `[stream]` 是**并列**的，不是递进：wav 的文本由上游 ASR 转好，所以不装 ASR；
-> 流式自带 ASR，但不装声纹/场景。两个都要就 `[all]`。
+> 只要文本记忆（下面的 ①）？`pip install -e ".[text]"` 就够，一个模型都不用下。
+> 中间那档 `".[wav]"` 是文本 + 语音记忆层（声纹 / 声学场景 / 情绪），不含流式 ASR。
+> 三档递进：`text` ⊂ `wav` ⊂ `all`。`-e` 是可编辑安装，还没发 PyPI，所以从 clone 装。
 
 ### 默认配置
 
@@ -187,42 +177,19 @@ orchestrator.py    编排实现（把三组件串成 Search/Ingest pipeline）
 ## 主业务逻辑：实时对话一轮
 
 麦克风逐帧喂进 `vm.stream()`，说完一轮就拿到 `Turn`——**记忆早在你说话时就查好了**，
-关键路径上只剩回复模型。这就是全部：
+关键路径上只剩回复模型。完整可跑的脚本是 **[`example.py`](example.py)**（60 行，
+投机预取的四个时机也写在它的 docstring 里）：
 
-```python
-import asyncio, queue
-import numpy as np, sounddevice as sd
-from voicemem import VoiceMem
-
-vm = VoiceMem.from_config({                     # 检索侧全本地 → 投机预取 0 网络
-    "embedding": {"provider": "local"},
-    "slots":     {"provider": "local"},
-})
-stream = vm.stream(on_partial=lambda t: print(f"\r🎙️  {t}", end="", flush=True),
-                   src_rate=16000)
-
-mic_q = queue.Queue()                           # callback 只丢数据，不被生成阻塞
-def on_mic(indata, *_):
-    mic_q.put((np.clip(indata[:, 0], -1, 1) * 32767).astype(np.int16).tobytes())
-
-async def main():
-    loop = asyncio.get_running_loop()
-    with sd.InputStream(samplerate=16000, channels=1, dtype="float32",
-                        blocksize=320, callback=on_mic):        # 20ms 一帧
-        while True:
-            st = await stream.feed(await loop.run_in_executor(None, mic_q.get))
-            if st.turn:                                          # VAD 确认说完
-                answer = await vm.reply(st.turn)                 # 记忆已就绪，直接生成
-                print(f"\n🧑 {st.turn.text}\n🤖 {answer}")
-                vm.ingest(st.turn.text, async_facts=True)        # 存这轮，抽事实走后台
-
-asyncio.run(main())
+```bash
+pip install -e ".[all]" sounddevice
+bash scripts/download_models.sh models
+python example.py                    # 需要麦克风，Ctrl-C 退出
 ```
 
 ### 回复：两条路
 
-上面那行 `vm.reply()` 走的是内置 provider。换成自己的模型就多一个参数——两条路的
-调用口完全一样（`voicemem/reply.py`）：
+`example.py` 里那行 `await vm.reply(st.turn)` 走的是内置 provider。换成自己的模型就
+多一个参数——两条路的调用口完全一样（`voicemem/reply.py`）：
 
 ```python
 vm = VoiceMem(reply=my_fn)                                  # 路 B：自己的模型/函数
