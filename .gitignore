@@ -22,3 +22,7 @@ service/models/
 
 # Electron desktop wrapper (openai_voice_demo/desktop/)
 node_modules/
+
+# 本地演示用，不进仓库：多人版 demo（web/ 的本地分叉）+ 造种子记忆的脚本
+demo_local/
+scripts/seed_*.py

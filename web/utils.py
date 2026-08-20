@@ -29,7 +29,7 @@ client = AsyncOpenAI()
 
 
 # ── 音频小工具 ────────────────────────────────────────────────────────────────
-def resample(f32, src=24000, dst=16000):        # 脑图 html 发 24k，sherpa ASR 要 16k
+def resample(f32, src=24000, dst=16000):        # 脑图 html 发 24k，流式 ASR 要 16k
     n = int(len(f32) * dst / src)
     return np.interp(np.arange(n) * src / dst, np.arange(len(f32)), f32).astype(np.float32)
 
