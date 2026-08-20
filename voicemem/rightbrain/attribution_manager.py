@@ -15,6 +15,11 @@ from .graph_store import RightBrainGraphStore
 from .store import RightBrainStore
 
 
+def _is_cjk(text: str) -> bool:
+    cjk = sum(1 for c in text if "一" <= c <= "鿿")
+    return cjk / max(sum(1 for c in text if c.isalpha()) + cjk, 1) >= 0.3
+
+
 class AttributionManager:
     def __init__(
         self,
@@ -42,7 +47,12 @@ class AttributionManager:
             if not contents:
                 continue
 
-            new_desc = self._summarize_entity(ent.name, [c for _, c, _ in contents])
+            src = [c for _, c, _ in contents]
+            new_desc = self._summarize_entity(ent.name, src)
+            # 同上：语言跟证据对不上就不写，留着上一版描述——画像每轮都会拼进
+            # system prompt，中英混杂比少一条更糟。
+            if new_desc and _is_cjk(new_desc) != _is_cjk(" ".join(src)):
+                new_desc = ""
             if new_desc:
                 self._graph.set_entity_description(eid, new_desc)
 
@@ -54,6 +64,12 @@ class AttributionManager:
                 if already_refined:
                     continue
                 refined = self._refine_memory_item(ent.name, content)
+                # 换语言了就丢弃：prompt 里写了"必须保持原句语言"但模型不保证遵守，
+                # 一旦把中文原话精炼成英文，存的就不再是用户说过的话了（记忆是证据，
+                # 翻译过的证据没法用），后续归纳出的画像也跟着中英混杂。
+                if refined and _is_cjk(refined) != _is_cjk(content):
+                    print(f"[Attribution] 精炼后语言变了，保留原句：{content[:30]}")
+                    refined = ""
                 if refined and refined != content:
                     self._rb_store.update_content(mid, refined)
                 self._rb_store.merge_metadata(mid, {"refined": True})
@@ -95,6 +111,9 @@ class AttributionManager:
             if not entities:
                 continue
             new_desc = self._summarize_slot(slot.name, entities)
+            src = " ".join(f"{e.name}{e.description or ''}" for e in entities)
+            if new_desc and _is_cjk(new_desc) != _is_cjk(src):
+                new_desc = ""
             if new_desc:
                 self._graph.set_slot_description(sid, new_desc)
 
