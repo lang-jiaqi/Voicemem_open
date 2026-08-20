@@ -461,6 +461,20 @@ def ingest_voice_input(
     existing_for_extraction = _drop_other_named_people(existing_for_extraction)
 
     # ── Step 2: 抽取原子事实 ─────────────────────────────────────────────────
+    # 原文兜底：抽取（走 OpenAI）失败或没抽到事实时，直接把整句原文当一条记忆存，
+    # 让本地 E5 向量库照样能长脑图、能检索（0 OpenAI）。下游 ConflictResolver 无 key
+    # 会自动降级成 ADD-only。
+    def _raw_fallback() -> list:
+        # 默认关：只存 LLM 抽取出的高质量事实。设 VOICEMEM_INGEST_RAW_FALLBACK=1 才在
+        # 抽取失败/无事实时把原文兜底存下（无 key / 离线 demo 用）。
+        if os.environ.get("VOICEMEM_INGEST_RAW_FALLBACK", "0") != "1":
+            return []
+        raw = " ".join(c.sentence for c in vi.contents if c.sentence).strip()
+        if not raw:
+            return []
+        from voicemem.leftbrain.extract_facts_openai import ExtractedAdditiveMemory
+        return [ExtractedAdditiveMemory(local_id="0", text=raw, attributed_to="user")]
+
     try:
         extracted = extractor.extract(
             new_messages=messages,
@@ -469,19 +483,26 @@ def ingest_voice_input(
             current_date=vi.begin_time,
         )
     except Exception as e:
-        return VoiceIngestResult(
-            voice_id=vi.id, memory_ids=[], facts_count=0,
-            begin_time=vi.begin_time, end_time=vi.end_time,
-            slots=vi.slots, messages_count=len(messages),
-            error=f"extraction_failed: {e}",
-        )
+        extracted = _raw_fallback()
+        print(f"[ingest] 抽取失败（{e}）→ {'原文兜底入库' if extracted else '无原文，跳过'}", flush=True)
+        if not extracted:
+            return VoiceIngestResult(
+                voice_id=vi.id, memory_ids=[], facts_count=0,
+                begin_time=vi.begin_time, end_time=vi.end_time,
+                slots=vi.slots, messages_count=len(messages),
+                error=f"extraction_failed: {e}",
+            )
 
     if not extracted:
-        return VoiceIngestResult(
-            voice_id=vi.id, memory_ids=[], facts_count=0,
-            begin_time=vi.begin_time, end_time=vi.end_time,
-            slots=vi.slots, messages_count=len(messages),
-        )
+        extracted = _raw_fallback()
+        if extracted:
+            print("[ingest] 抽取无事实 → 原文兜底入库", flush=True)
+        else:
+            return VoiceIngestResult(
+                voice_id=vi.id, memory_ids=[], facts_count=0,
+                begin_time=vi.begin_time, end_time=vi.end_time,
+                slots=vi.slots, messages_count=len(messages),
+            )
 
     # ── Step 3-4: Conflict resolution (Mem0 V1 风格) ─────────────────────────
     from voicemem.leftbrain.extract_facts_openai import ConflictResolver
@@ -585,6 +606,7 @@ def ingest_voice_input(
         **(extra_metadata or {}),
     }
     memory_ids = repo.append_extracted(extracted, user_id=user_id, extra_metadata=meta)
+    print(f"[ingest] 入库 {len(memory_ids or [])} 条：{[m.text[:20] for m in extracted][:3]}", flush=True)
 
     # 预分类 slot 写入 memory_tags
     slotv2_hints = map_voice_slots_to_slotv2(vi.slots)
