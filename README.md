@@ -28,10 +28,9 @@
 
 ## Overview
 
-* **[Quick Start](#quick-start)**
+* **[Quick Start](#quick-start)** —— 安装 · [三种输入接口](#interfaces) · 跑 demo
 * **[Architecture](#architecture)**
 * **[Models](#models)**
-* **[三种输入接口](#interfaces)**
 * **[Demo](#demo)**
 * **[Released Model](#released-model)**
 * **[Acknowledgements](#acknowledgements)**
@@ -39,7 +38,7 @@
 
 ## Quick Start
 
-**安装**
+### 安装
 ```bash
 git clone https://github.com/lang-jiaqi/Voicemem_open.git
 cd Voicemem_open
@@ -51,17 +50,88 @@ export OPENAI_API_KEY=sk-...
 
 > 只想纯文本试用、不下语音模型？`pip install -e ".[demo]"` 即可（打字通道能跑通记忆 + 回复）。
 
-**三行上手（文本）**
+### 三种输入接口 <a id="interfaces"></a>
+
+文本 / wav / 流式，三者在核心并列——都是完整可跑的脚本，复制即用。
+
+**① 文本**
+
 ```python
 from voicemem import VoiceMem
 
-vm = VoiceMem(mode="text_mode")               # 自动读环境变量 OPENAI_API_KEY（见上面 export）
-vm.ingest("中午和 Alex 吃了拉面")
-vm.search("我中午吃了什么？")                 # 左右脑一起检索
-vm.left_brain.search("我中午吃了什么？")       # 只要左脑事实、更快
+vm = VoiceMem(api_key="sk-...", mode="text_mode")
+
+vm.ingest("我是素食主义者，对坚果过敏。")
+result = vm.search("我的饮食禁忌是什么？")     # 左右脑一起检索
+for hit in result.hits:
+    print(hit.text)
+
+vm.left_brain.search("我的饮食禁忌是什么？")    # 只要左脑事实、更快
 ```
 
-**语音 Demo（脑图 + 0–500ms 投机预取）**
+**② 语音（wav）**
+
+```python
+from voicemem import VoiceMem
+
+vm = VoiceMem(api_key="sk-...", mode="multi_modal")
+
+# 存：上游转好的文本 + 音频文件（内部跑声纹/场景/情绪感知）
+vm.ingest("今天在咖啡馆和 Alex 聊了创业。", audio="turn.wav")
+
+# 只拿声学信号、不写记忆
+sig = vm.preprocess("今天在咖啡馆和 Alex 聊了创业。", audio="turn.wav")
+print(sig.speaker, sig.emotion, sig.scene_tag)      # 说话人 / 情绪 / 声学场景
+
+for hit in vm.search("我和 Alex 聊了什么？").hits:
+    print(hit.text)
+```
+
+**③ 流式（逐块喂音频）**
+
+```python
+import asyncio
+import numpy as np
+import soundfile as sf
+from voicemem import VoiceMem
+
+# 统一 config：本地 E5，0 网络
+vm = VoiceMem.from_config({
+    "mode": "multi_modal",
+    "embedding": {"provider": "local"},
+    "slots":     {"provider": "local"},
+})
+
+async def main():
+    audio, sr = sf.read("speech.wav", dtype="float32")     # mono
+    pcm16 = (np.clip(audio, -1, 1) * 32767).astype(np.int16)
+
+    # 边喂边出 partial；VAD 判说完时拿到一轮记忆结果（0–500ms 投机预取、barge-in）
+    stream = vm.stream(on_partial=lambda t: print(f"\r{t}", end="", flush=True), src_rate=sr)
+
+    step = int(sr * 0.6)                                   # 600ms 一块
+    for i in range(0, len(pcm16), step):
+        st = await stream.feed(pcm16[i:i+step].tobytes())  # 每块都返回 StreamState
+        # st.state  "<speak>" | "<silence>"
+        # st.memory 边说边预取到的 SearchResult；还没算好时 None
+        if st.turn:                                        # 一轮说完才非 None
+            print("\n[说完]", st.turn.text)
+            for hit in st.turn.result.hits:
+                print("  记忆:", hit.text)
+
+asyncio.run(main())
+```
+
+> **返回类型**：`feed` / `feed_partial` 每块都返回 **`StreamState`**，一轮说完时
+> `st.turn` 才是 `Turn`（`.text` / `.result` / `.memory_context`）；`feed_text("…")`
+> 是打字轮，直接返回 `Turn`。
+>
+> 接**外部 ASR**（FunASR / Whisper / 云 ASR）就把 ③ 的 `feed` 换成
+> `await stream.feed_partial(累积转写, ended=外部VAD判说完)`——换 ASR 只改喂进来的
+> 那一行。完整示例见 [`scripts/realtime_funasr_qwen.py`](scripts/realtime_funasr_qwen.py)。
+
+### 语音 Demo（脑图 + 0–500ms 投机预取）
+
 ```bash
 cd web && DEMO_MODE=llm_tts python run.py     # http://localhost:8787
 # 想要更自然的原生语音： DEMO_MODE=realtime python run.py  （需 Realtime API 权限）
@@ -148,84 +218,6 @@ asyncio.run(main())
 ```python
 VoiceMem.from_config({"embedding": {"provider": "local"}, "slots": {"provider": "local"}})   # 记忆全本地
 ```
-
-## 三种输入接口 <a id="interfaces"></a>
-
-文本 / wav / 流式，三者在核心并列——都是完整可跑的脚本，复制即用。
-
-### ① 文本
-
-```python
-from voicemem import VoiceMem
-
-vm = VoiceMem(api_key="sk-...", mode="text_mode")
-
-vm.ingest("我是素食主义者，对坚果过敏。")
-result = vm.search("我的饮食禁忌是什么？")
-for hit in result.hits:
-    print(hit.text)
-```
-
-### ② 语音（wav）
-
-```python
-from voicemem import VoiceMem
-
-vm = VoiceMem(api_key="sk-...", mode="multi_modal")
-
-# 存：上游转好的文本 + 音频文件（内部跑声纹/场景/情绪感知）
-vm.ingest("今天在咖啡馆和 Alex 聊了创业。", audio="turn.wav")
-
-# 只拿声学信号、不写记忆
-sig = vm.preprocess("今天在咖啡馆和 Alex 聊了创业。", audio="turn.wav")
-print(sig.speaker, sig.emotion, sig.scene_tag)      # 说话人 / 情绪 / 声学场景
-
-for hit in vm.search("我和 Alex 聊了什么？").hits:
-    print(hit.text)
-```
-
-### ③ 流式（逐块喂音频）
-
-```python
-import asyncio
-import numpy as np
-import soundfile as sf
-from voicemem import VoiceMem
-
-# 统一 config：本地 E5，0 网络
-vm = VoiceMem.from_config({
-    "mode": "multi_modal",
-    "embedding": {"provider": "local"},
-    "slots":     {"provider": "local"},
-})
-
-async def main():
-    audio, sr = sf.read("speech.wav", dtype="float32")     # mono
-    pcm16 = (np.clip(audio, -1, 1) * 32767).astype(np.int16)
-
-    # 边喂边出 partial；VAD 判说完时拿到一轮记忆结果（0–500ms 投机预取、barge-in）
-    stream = vm.stream(on_partial=lambda t: print(f"\r{t}", end="", flush=True), src_rate=sr)
-
-    step = int(sr * 0.6)                                   # 600ms 一块
-    for i in range(0, len(pcm16), step):
-        st = await stream.feed(pcm16[i:i+step].tobytes())  # 每块都返回 StreamState
-        # st.state  "<speak>" | "<silence>"
-        # st.memory 边说边预取到的 SearchResult；还没算好时 None
-        if st.turn:                                        # 一轮说完才非 None
-            print("\n[说完]", st.turn.text)
-            for hit in st.turn.result.hits:
-                print("  记忆:", hit.text)
-
-asyncio.run(main())
-```
-
-> **返回类型**：`feed` / `feed_partial` 每块都返回 **`StreamState`**，一轮说完时
-> `st.turn` 才是 `Turn`（`.text` / `.result` / `.memory_context`）；`feed_text("…")`
-> 是打字轮，直接返回 `Turn`。
->
-> 接**外部 ASR**（FunASR / Whisper / 云 ASR）就把 ③ 的 `feed` 换成
-> `await stream.feed_partial(累积转写, ended=外部VAD判说完)`——换 ASR 只改喂进来的
-> 那一行。完整示例见 [`scripts/realtime_funasr_qwen.py`](scripts/realtime_funasr_qwen.py)。
 
 ## Demo
 
