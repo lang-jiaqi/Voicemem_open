@@ -54,7 +54,11 @@ def build_memory_context(result: Any, max_rb: int = 3) -> str:
     if hits:
         lines.append("MEMORY CONTEXT (things you remember about the user):")
         for hit in hits:
-            lines.append(f"- {hit.text}")
+            # 带上事件日期（跟右脑 heartnote 的 [YYYY-MM-DD] 前缀同一个格式）：
+            # 事实正文里多是"上周""一个多月了"这种相对说法，没有绝对日期，
+            # "这事在那事之前吗"就无从判断。
+            when = getattr(hit, "observed_at", "") or ""
+            lines.append(f"- [{when}] {hit.text}" if when else f"- {hit.text}")
     rb_hits = getattr(result, "rb_hits", None) or []
     if rb_hits:
         lines.append("")
