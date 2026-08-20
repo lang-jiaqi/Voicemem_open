@@ -99,6 +99,12 @@ class VoiceMem:
             if audio is None:
                 raise ValueError("ingest() 要么给 text，要么给 audio")
             text = self.transcribe(audio)
+        # 没有音频就没有声纹，说话人只能是账号主人本人——用 "user" 这个约定 id
+        # （见 voice_input_to_messages），否则会走到给"未验证声纹"准备的防御标签上，
+        # 存下来的每条事实都变成"Unidentified speaker Speaker 0 是素食主义者"。
+        # 有音频时保持编排层默认，让声纹识别去定说话人（多人场景不能假设是主人）。
+        if audio is None:
+            kw.setdefault("speaker", "user")
         return self._o.Ingest(text, audio_path=audio, **kw)
 
     def transcribe(self, audio) -> str:
