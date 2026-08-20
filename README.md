@@ -178,12 +178,55 @@ We build **ChatMem-400K** through a three-stage pipeline: **memory-world constru
 
 ## Voicechatting with Voiem Model Families
 
-[todo. jiaqi.] 运行，见文件。 / finetune 给指令。
+用微调过的模型做实时语音对话——麦克风 → voicemem 边听边预取记忆 → 模型带着记忆回答：
+
+```bash
+pip install funasr sounddevice transformers peft torch
+export OPENAI_API_KEY=sk-...          # 只用于写入侧的事实抽取，检索全本地
+
+python scripts/realtime_funasr_qwen.py
+```
+
+训一个自己的 adapter。默认超参就是已发布 `checkpoint-3318` 那次用的，照默认跑
+即复现同一个 adapter：
+
+```bash
+pip install trl peft datasets accelerate bitsandbytes
+
+python finetune/train.py --data data/train.jsonl
+```
+
+数据格式、显存要求、换基座怎么调，见 **[finetune/README.md](finetune/README.md)**。
 
 
 ## Evaluation
 
-[todo. jiaqi.] 运行指令。 以上两个参考mega-asr，应该是voicemem外的两个文件夹。 依然，用sb都能看懂的代码，一键运行。
+一条命令跑完一个 benchmark：
+
+```bash
+export OPENAI_API_KEY=sk-...
+
+# 先用仓库自带的小样例验证环境（2 段对话 5 个问题）
+python evaluation/run.py --dataset locomo --data evaluation/examples/locomo_sample.json
+
+# 换成真数据集
+python evaluation/run.py --dataset locomo --data data/locomo.json
+```
+
+```text
+locomo  10 段对话 · 152 题
+得分 139/152  =  91.4%
+   multi_hop                88.2%
+   temporal                 85.7%
+   single_hop               95.1%
+检索中位数 12ms · 记忆中位数 298 tokens
+```
+
+跑之前先加 `--inspect`：不花钱、不调模型，只把数据集解析结果打出来确认字段读对了。
+
+评测只把**检索到的记忆**交给答题模型，不给原始对话——给了原文就成了阅读理解，
+测不出记忆系统。协议细节和「怎么加一个新 benchmark」（一个文件、两个函数）见
+**[evaluation/README.md](evaluation/README.md)**。
 
 
 
