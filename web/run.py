@@ -7,14 +7,18 @@
 跑（参数见 ``--help``；每个都能用同名环境变量给默认值）::
 
     export OPENAI_API_KEY=sk-...
+    python web/run.py                     # 默认 realtime
     python web/run.py \\
-      --mode llm_tts \\
+      --mode llm_tts \\                    # 没有 Realtime 权限时走这条
       --port 8787 \\
       --spec_min_chars 6 \\
       --gamble_ms 200 \\
       --confirm_ms 500
 
-``--mode realtime`` 切 OpenAI Realtime 原生语音（需 Realtime API 权限）。
+默认走 ``realtime``（OpenAI 原生语音）：一次往返直接出声，不像 llm_tts 那样要
+"LLM 出文本(~1.0s) → 攒够一句 → TTS 合成(~1.2s)" 两段串行，体验差一截。
+key 没有 Realtime 权限就用 ``--mode llm_tts``，那条路只要普通 chat + TTS，
+TTS 还能换成本地离线模型（``TTS_BACKEND=local``）。
 
 注意：记忆向量用本地 384 维 E5（投机预算内不能走网络）。换过旧 demo（OpenAI 1536 维）留了
 记忆库的，维度不兼容——先清掉记忆目录再跑。
@@ -44,8 +48,9 @@ os.environ.setdefault("VOICEMEM_MODELS_DIR", str(_ROOT / "models"))
 def _parse(argv):
     p = argparse.ArgumentParser(description="voicemem web demo（脑图 + 0–500ms 投机预取）")
     p.add_argument("--mode", choices=["llm_tts", "realtime"],
-                   default=os.environ.get("DEMO_MODE", "llm_tts"),
-                   help="回复控制流：llm_tts=LLM 流→TTS 流；realtime=OpenAI 原生语音")
+                   default=os.environ.get("DEMO_MODE", "realtime"),
+                   help="回复控制流：realtime=OpenAI 原生语音（默认，体验最好）；"
+                        "llm_tts=LLM 流→TTS 流（不需要 Realtime 权限，可换本地 TTS）")
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=int(os.environ.get("VOICEMEM_PORT", 8787)))
     p.add_argument("--spec_min_chars", type=int, default=6,
@@ -201,6 +206,18 @@ async def voicemem_realtime(pending, conn, send, send_audio):
     vm.ingest(pending.text, agent_reply=reply, async_facts=True)   # 两半一起存，抽事实走后台
 
 
+async def _no_realtime(sock, err):
+    """没有 Realtime 权限时别让人对着 traceback 猜——直接说清楚换哪条路。"""
+    msg = (f"连不上 OpenAI Realtime（{type(err).__name__}: {err}）。"
+           "这个 key 可能没有 Realtime 权限——改用 `python web/run.py --mode llm_tts`，"
+           "那条路只要普通 chat + TTS。")
+    print(f"[web] {msg}", flush=True)
+    try:
+        await sock.send_json({"type": "error", "message": msg})
+    except Exception:
+        pass
+
+
 # ══════════════════ 驱动 voicemem 核心流式会话（vm.stream()）══════════════════
 # ASR + VAD + 0–500ms 投机预取（边说边预取 / 200ms 赌说完 / barge-in / 500ms 确认）
 # 全在核心 VoiceStream 里。这里只做 demo 该做的：搬 socket 帧、发 partial、把说完
@@ -245,14 +262,23 @@ async def llm_tts_session(sock):
 async def realtime_session(sock):
     """方案 A：整段麦克风音频平行喂给 OpenAI Realtime；本地 ASR+VAD 只负责投机记忆 +
     用 500ms 判回合（关掉 OpenAI 自带 server_vad）。"""
-    async with utils.realtime_connect(REPLY) as conn:
-        await conn.session.update(session={"type": "realtime", "turn_detection": None})
+    connected = False
+    try:
+        async with utils.realtime_connect(REPLY) as conn:
+            # 握手成功不代表能用：没权限/模型名不对时，OpenAI 是**连上之后**再发
+            # close 4000（invalid_model / 权限错误）。所以要等第一次交互成功才算数。
+            await conn.session.update(session={"type": "realtime", "turn_detection": None})
+            connected = True
 
-        async def on_frame(raw):
-            await conn.input_audio_buffer.append(audio=base64.b64encode(raw).decode())
+            async def on_frame(raw):
+                await conn.input_audio_buffer.append(audio=base64.b64encode(raw).decode())
 
-        async for pending in anticipate(sock, on_frame=on_frame):
-            await voicemem_realtime(pending, conn, sock.send_json, sock.send_bytes)
+            async for pending in anticipate(sock, on_frame=on_frame):
+                await voicemem_realtime(pending, conn, sock.send_json, sock.send_bytes)
+    except Exception as e:
+        if connected:
+            raise
+        await _no_realtime(sock, e)
 
 
 app = utils.build_app(MODE, realtime_session if MODE == "realtime" else llm_tts_session, vm.classify)
