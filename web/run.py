@@ -181,6 +181,18 @@ async def voicemem_llm_tts(pending, send, send_audio):
     await speaker
 
 
+_RT_PERSONA = "你是用户的语音助手，简短自然地回答。"
+
+
+def _realtime_instructions(memory_context: str) -> str:
+    """人设 + 这一轮检索到的记忆。要说清楚这是「你记得的事」，否则模型会把它当成
+    背景资料念出来，而不是当成自己对这个用户的记忆自然地用。"""
+    if not memory_context:
+        return _RT_PERSONA
+    return (f"{_RT_PERSONA}\n\n以下是你记得的关于这个用户的事，回答时自然地用上，"
+            f"别说「根据记录」这类话：\n{memory_context}")
+
+
 async def start_realtime_turn(pending, conn, send):
     """把预取好的记忆注入 Realtime session，触发这一轮的原生语音。
 
@@ -190,14 +202,17 @@ async def start_realtime_turn(pending, conn, send):
     """
     await send({"type": "user_transcript", "text": pending.text})
     await send({"type": "memory_hits", **utils.hits_payload(pending.result)})
-    await conn.session.update(session={"type": "realtime", "turn_detection": None,
-                                       "instructions": pending.memory_context or ""})
     if pending.spoken:
         await conn.input_audio_buffer.commit()
     else:
         await conn.conversation.item.create(item={"type": "message", "role": "user",
                                                   "content": [{"type": "input_text", "text": pending.text}]})
-    await conn.response.create()
+    # 记忆走 response.create 的 per-response instructions，不是 session.update。
+    # 后者是会话级设置，实测更新完模型这一轮根本读不到（问"我的猫叫什么"，库里
+    # 明明检索到了"叫墨墨"，模型还答"你刚提过但我没听清"）。
+    await conn.response.create(response={
+        "instructions": _realtime_instructions(pending.memory_context),
+    })
     await send({"type": "answer_start"})
 
 
