@@ -30,6 +30,7 @@ import json
 import os
 import re
 import sys
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,11 +75,47 @@ import utils                                         # noqa: E402  同目录管�
 from voicemem import VoiceMem                        # noqa: E402
 
 BARGE_DEBUG = os.environ.get("BARGE_DEBUG", "1") != "0"
-BARGE_THRESHOLD = float(os.environ.get("BARGE_THRESHOLD", "0.3"))   # 越小越容易被打断   # 打断为什么没触发：看这几行日志
+BARGE_THRESHOLD = float(os.environ.get("BARGE_THRESHOLD", "0.45"))  # 越小越容易被打断
+#: 要连续听到多久的人声才算"他真的插话了"。太短的话，助手自己的声音从扬声器
+#: 回到麦克风、回声消除没压干净的那点残留就够触发，表现是"刚说小半句就闭嘴"。
+BARGE_MIN_MS = int(os.environ.get("BARGE_MIN_MS", "280"))
+#: 助手刚开口那一小段不允许被打断——那时候麦克风里几乎只有它自己的声音。
+BARGE_GRACE_MS = int(os.environ.get("BARGE_GRACE_MS", "500"))
+MIC_RATE = 24000                       # 前端上行的采样率（index.html 的 SAMPLE_RATE）   # 打断为什么没触发：看这几行日志
 MODE = ARGS.mode                                     # llm_tts | realtime
 SPEC_MIN_CHARS = ARGS.spec_min_chars                 # partial 起投机
 GAMBLE_S  = ARGS.gamble_ms / 1000                    # 赌说完
 CONFIRM_S = ARGS.confirm_ms / 1000                   # VAD 确认结束
+
+_RT_PERSONA = (
+    "你是这个用户认识很久的朋友，不是助手。简短、自然、像人说话。\n"
+    "记忆分两种，用法完全不同：\n"
+    "· MEMORY CONTEXT 里的事实——可以直接提，就像你本来就记得（"
+    "「Annie 那事你还好吗」，不是「根据记录，Annie 要转学」）。\n"
+    "· HOW TO SPEAK 里的内容——只影响你的语气、先说什么、什么别碰。"
+    "一个字都不要说出来。听出他心情不好就先接住情绪再说事；"
+    "知道他不好意思开口，就别追问；知道他讨厌什么，就绕开。\n"
+    "别复述他刚说的话，别用「我记得你说过」开头，别念清单。\n"
+    "说话方式：像朋友聊天那样有起伏——该笑就笑出来，替他高兴就热一点，"
+    "他难过就把语速放慢、声音压低。用「嗯」「哎」「诶」这种口头反应开头，"
+    "不要播音腔，不要每句都四平八稳。句子短，一次说一两句就停。"
+)
+
+
+_STRANGER = ("说话的不是你认识的那个人——声纹对不上。你对他没有任何记忆。"
+             "别把别人的事讲给他听，也别猜他是谁。就当第一次见面，"
+             "友好但如实地说你还不认识他。")
+
+
+def _realtime_instructions(memory_context: str, stranger: bool = False) -> str:
+    """人设 + 这一轮检索到的记忆。要说清楚这是「你记得的事」，否则模型会把它当成
+    背景资料念出来，而不是当成自己对这个用户的记忆自然地用。"""
+    if stranger:
+        return f"{_RT_PERSONA}\n\n{_STRANGER}"
+    if not memory_context:
+        return _RT_PERSONA
+    return f"{_RT_PERSONA}\n\n{memory_context}"
+
 
 # ══════════════════ 统一配置入口：一个 dict 配齐所有本地/api 模型 ══════════════════
 # 打开这个 dict 就知道每个模型走本地还是 api。记忆侧（embedding/slots）走本地 E5
@@ -92,7 +129,8 @@ CONFIG = {
     "slots":     {"provider": "local"},              # slot 分类走本地 E5（0 LLM）
     # reply：回复用模型（核心不管，web 读）。默认全走 OpenAI api。
     "reply": {
-        "llm":      {"provider": "openai", "config": {"model": utils.CHAT_MODEL}},
+        "llm":      {"provider": "openai", "config": {"model": utils.CHAT_MODEL,
+                                                      "system": _RT_PERSONA}},
         "tts":      {"provider": utils.TTS_BACKEND, "config": {"model": utils.TTS_MODEL}},
         "realtime": {"provider": "openai", "config": {"model": utils.RT_MODEL}},
     },
@@ -178,9 +216,10 @@ async def voicemem_llm_tts(pending, send, send_audio):
     try:
         # 跟 realtime 用同一份指令：两条路必须表现一致，否则换个 --mode
         # 人设和「右脑不许念出来」的约束就悄悄没了。
-        async for d in utils.llm_stream(pending.text,
-                                        _realtime_instructions(pending.memory_context, pending.stranger),
-                                        REPLY):
+        # 走核心回复层（人设在 CONFIG.reply.llm.config.system，见 voicemem/reply.py
+        # 的 compose_system：system + memory_context，和 realtime 那条拼出来的一样）。
+        async for d in vm.reply_stream(
+                pending.text, _STRANGER if pending.stranger else pending.memory_context):
             reply += d
             buf += d
             await send({"type": "answer_delta", "text": d})
@@ -210,35 +249,6 @@ async def voicemem_llm_tts(pending, send, send_audio):
     except Exception as e:
         print(f"[web] 存这一轮失败：{type(e).__name__}: {e}", flush=True)
 
-
-_RT_PERSONA = (
-    "你是这个用户认识很久的朋友，不是助手。简短、自然、像人说话。\n"
-    "记忆分两种，用法完全不同：\n"
-    "· MEMORY CONTEXT 里的事实——可以直接提，就像你本来就记得（"
-    "「Annie 那事你还好吗」，不是「根据记录，Annie 要转学」）。\n"
-    "· HOW TO SPEAK 里的内容——只影响你的语气、先说什么、什么别碰。"
-    "一个字都不要说出来。听出他心情不好就先接住情绪再说事；"
-    "知道他不好意思开口，就别追问；知道他讨厌什么，就绕开。\n"
-    "别复述他刚说的话，别用「我记得你说过」开头，别念清单。\n"
-    "说话方式：像朋友聊天那样有起伏——该笑就笑出来，替他高兴就热一点，"
-    "他难过就把语速放慢、声音压低。用「嗯」「哎」「诶」这种口头反应开头，"
-    "不要播音腔，不要每句都四平八稳。句子短，一次说一两句就停。"
-)
-
-
-_STRANGER = ("说话的不是你认识的那个人——声纹对不上。你对他没有任何记忆。"
-             "别把别人的事讲给他听，也别猜他是谁。就当第一次见面，"
-             "友好但如实地说你还不认识他。")
-
-
-def _realtime_instructions(memory_context: str, stranger: bool = False) -> str:
-    """人设 + 这一轮检索到的记忆。要说清楚这是「你记得的事」，否则模型会把它当成
-    背景资料念出来，而不是当成自己对这个用户的记忆自然地用。"""
-    if stranger:
-        return f"{_RT_PERSONA}\n\n{_STRANGER}"
-    if not memory_context:
-        return _RT_PERSONA
-    return f"{_RT_PERSONA}\n\n{memory_context}"
 
 
 async def start_realtime_turn(pending, conn, send):
@@ -306,6 +316,7 @@ async def anticipate(sock, on_frame=None, on_speech=None):
     stream = vm.stream(spec_min_chars=SPEC_MIN_CHARS, gamble_s=GAMBLE_S, confirm_s=CONFIRM_S)
     last_partial = ""
     owner = {"id": ""}                    # 这场对话第一个开口的声纹
+    speech_ms = 0.0                       # 连续听到人声多久了
     while True:
         msg = await sock.receive()
         if msg.get("type") == "websocket.disconnect":         # 关页面/刷新：收工
@@ -322,10 +333,18 @@ async def anticipate(sock, on_frame=None, on_speech=None):
         if on_frame:
             await on_frame(raw)                               # 方案 A：音频也进 OpenAI 缓冲
         st = await stream.feed(raw)                           # 核心：ASR + VAD + 投机预取
-        if st.state == "<speak>" and on_speech:
-            await on_speech()                                 # 助手还在说 → 打断它
-        if BARGE_DEBUG and st.state == "<speak>":
-            print("[barge] 本地VAD 听到人声", flush=True)
+        # 连续人声累计够 BARGE_MIN_MS 才算插话。单帧就触发的话，助手自己的声音
+        # 经扬声器回到麦克风、AEC 没压干净的那点残留就能把它自己打断。
+        frame_ms = len(raw) / 2 / MIC_RATE * 1000              # PCM16：2 字节一个样本
+        if st.state == "<speak>":
+            speech_ms += frame_ms
+        else:
+            speech_ms = 0.0
+        if speech_ms >= BARGE_MIN_MS and on_speech:
+            speech_ms = 0.0
+            if BARGE_DEBUG:
+                print(f"[barge] 连续人声 ≥{BARGE_MIN_MS}ms → 请求打断", flush=True)
+            await on_speech()
         if st.text.strip() and st.text != last_partial:
             last_partial = st.text
             await sock.send_json({"type": "partial_transcript", "text": st.text, "replace": True})
@@ -359,11 +378,16 @@ async def llm_tts_session(sock):
 
     现在回复丢进后台任务，读 socket 的循环一刻不停；听到人声就取消那个任务。
     """
-    turn = {"task": None}
+    turn = {"task": None, "t0": 0.0}
 
     async def stop_reply():
         task = turn["task"]
         if task is None or task.done():
+            return
+        since = (time.monotonic() - turn["t0"]) * 1000
+        if since < BARGE_GRACE_MS:
+            if BARGE_DEBUG:
+                print(f"[barge] 才说了 {since:.0f}ms，还在宽限期内，不打断", flush=True)
             return
         task.cancel()
         turn["task"] = None
@@ -374,6 +398,7 @@ async def llm_tts_session(sock):
 
     async for pending in anticipate(sock, on_speech=stop_reply):
         await stop_reply()                    # 上一轮还没说完就被新的一轮顶掉
+        turn["t0"] = time.monotonic()
         turn["task"] = asyncio.create_task(
             voicemem_llm_tts(pending, sock.send_json, sock.send_bytes))
 
@@ -423,7 +448,7 @@ async def realtime_session(sock):
             connected = True
 
             # 这一轮的状态：谁在说、说了什么、这轮用户的输入是什么
-            turn = {"live": False, "reply": "", "pending": None}
+            turn = {"live": False, "reply": "", "pending": None, "t0": 0.0}
 
             def close_turn():
                 """一轮结束（说完或被打断）：把两半对话一起存。被打断时存的是用户
@@ -490,6 +515,13 @@ async def realtime_session(sock):
                     if BARGE_DEBUG:
                         print("[barge] 有人声但助手没在说，忽略", flush=True)
                     return
+                # 刚开口那一小段不许打断：那时候麦克风里几乎只有助手自己的声音，
+                # 回声消除还没跟上，很容易一出声就把自己掐了。
+                since = (time.monotonic() - turn["t0"]) * 1000
+                if since < BARGE_GRACE_MS:
+                    if BARGE_DEBUG:
+                        print(f"[barge] 才说了 {since:.0f}ms，还在宽限期内，不打断", flush=True)
+                    return
                 if BARGE_DEBUG:
                     print("[barge] ★ 打断：本地VAD 触发", flush=True)
                 turn["live"] = False
@@ -505,7 +537,7 @@ async def realtime_session(sock):
                 async for pending in anticipate(sock, on_frame=on_frame, on_speech=on_speech):
                     if turn["live"]:                     # 上一轮还没说完就被新的一轮顶掉
                         await on_speech()
-                    turn.update(live=True, reply="", pending=pending)
+                    turn.update(live=True, reply="", pending=pending, t0=time.monotonic())
                     await start_realtime_turn(pending, conn, sock.send_json)
             finally:
                 pump_task.cancel()
