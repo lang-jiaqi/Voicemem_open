@@ -13,9 +13,6 @@
     ⑤ 判分             → 数据集自己的口径
 
 ④ 只给记忆不给原文，是这个评测的关键：给了原文就成了阅读理解，测不出记忆系统。
-
-结果写进 --out（默认 results/<dataset>.json），跑到一半中断可以直接重跑，
-已经做完的对话会跳过（见 --resume）。
 """
 from __future__ import annotations
 
@@ -52,6 +49,36 @@ def make_llm(model: str):
         )
         return (resp.choices[0].message.content or "").strip()
     return call
+
+
+def provenance() -> dict:
+    """跑这次评测时的环境。写进结果文件——半年后看到一个数字，能查出它是哪份代码跑的。"""
+    import platform
+    import subprocess
+    from datetime import datetime, timezone
+
+    def git(*a):
+        try:
+            return subprocess.run(["git", *a], cwd=ROOT, capture_output=True,
+                                  text=True, timeout=5).stdout.strip()
+        except Exception:
+            return ""
+
+    def version(pkg):
+        from importlib.metadata import PackageNotFoundError, version as v
+        try:
+            return v(pkg)
+        except PackageNotFoundError:
+            return ""
+
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "git_commit": git("rev-parse", "HEAD"),
+        "git_dirty": bool(git("status", "--porcelain")),   # 改动没提交就跑，数字对不回代码
+        "python": platform.python_version(),
+        "platform": platform.platform(),
+        "packages": {p: version(p) for p in ("voicemem", "mem0ai", "openai", "qdrant-client")},
+    }
 
 
 ANSWER_SYSTEM = """你要根据「记忆」回答用户的问题。
@@ -91,7 +118,8 @@ def run_conversation(conv, args, answer_llm, judge_llm) -> dict:
         memory = build_memory_context(result)
 
         answer = answer_llm(ANSWER_SYSTEM.format(memory=memory or "（没有相关记忆）"), q.text)
-        s = ds_score(args, q, answer, judge_llm)
+        s = (datasets.Score(0.0, 1.0, "未判分") if args.no_score
+             else ds_score(args, q, answer, judge_llm))
 
         got += s.correct
         total += s.total
@@ -139,7 +167,8 @@ def summarize(results: list[dict], dataset: str) -> dict:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="VoiceMem 评测：一条命令跑完一个 benchmark")
-    p.add_argument("--dataset", required=True, help="locomo / audiomc（见 evaluation/datasets/）")
+    p.add_argument("--dataset", required=True, choices=datasets.names(),
+                   help="跑哪个 benchmark（见 evaluation/datasets/）")
     p.add_argument("--data", required=True, help="数据集文件路径")
     p.add_argument("--out", default="", help="结果 json，默认 results/<dataset>.json")
     p.add_argument("--answer-model", default=os.environ.get("EVAL_ANSWER_MODEL", "gpt-4o-mini"),
@@ -156,6 +185,8 @@ def main() -> None:
     p.add_argument("--resume", action="store_true", help="接着上次跑，跳过已完成的对话")
     p.add_argument("--save-memory", action="store_true", help="把每题检索到的记忆也存进结果（体积大，便于复核）")
     p.add_argument("--inspect", action="store_true", help="只解析数据集并打印前几条，不跑评测")
+    p.add_argument("--no-score", action="store_true",
+                   help="只生成答案不判分，之后用 evaluation/score.py 判（换裁判不用重跑）")
     args = p.parse_args()
 
     out = Path(args.out or f"results/{args.dataset}.json")
@@ -186,6 +217,9 @@ def main() -> None:
                 for r in json.loads(out.read_text(encoding="utf-8")).get("results", [])}
         print(f"续跑：已完成 {len(done)} 段，跳过", flush=True)
 
+    prov = provenance()
+    if prov["git_dirty"]:
+        print("警告：工作区有未提交改动，这次的数字对不回某个 commit", flush=True)
     answer_llm, judge_llm = make_llm(args.answer_model), make_llm(args.judge)
     todo = [c for c in convs if c.id not in done]
     results = list(done.values())
@@ -210,7 +244,8 @@ def main() -> None:
             # 每段都落盘：跑几小时的评测中途挂了不用从头再来
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(json.dumps({"summary": summarize(results, args.dataset),
-                                       "config": vars(args), "results": results},
+                                       "config": vars(args), "provenance": prov,
+                                       "results": results},
                                       ensure_ascii=False, indent=2), encoding="utf-8")
 
     s = summarize(results, args.dataset)
@@ -222,6 +257,8 @@ def main() -> None:
             print(f"   {k:<24} {v:.1%}")
     print(f"检索中位数 {s['median_search_ms']:.0f}ms · 记忆中位数 {s['median_memory_tokens']} tokens")
     print(f"结果已存 {out}")
+    if args.no_score:
+        print(f"未判分。判分：python evaluation/score.py --file {out}")
 
 
 if __name__ == "__main__":

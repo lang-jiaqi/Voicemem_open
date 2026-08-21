@@ -53,13 +53,24 @@ class Score:
     note: str = ""          # 判分理由，写进结果文件供人工复核
 
 
+#: benchmark 名 -> 模块路径。加新的：照着 locomo.py 写个文件，实现 load() 和
+#: score()，在这里登记一行。CLI 的 --dataset 直接用这里的键做 choices，
+#: 名字写错在参数解析阶段就报错，--help 也会自动列出。
+DATASETS = {
+    "locomo": "evaluation.datasets.locomo",
+}
+
+
+def names() -> list[str]:
+    return sorted(DATASETS)
+
+
 def get(name: str):
-    """按名字拿数据集适配器。加新的：见 evaluation/README.md「加一个新 benchmark」。"""
-    from evaluation.datasets import locomo
-    table = {"locomo": locomo}
-    if name not in table:
+    """按名字拿数据集适配器。"""
+    import importlib
+    if name not in DATASETS:
         raise SystemExit(
-            f"没有这个数据集：{name}。现有：{', '.join(table)}\n"
+            f"没有这个数据集：{name}。现有：{', '.join(names())}\n"
             f"加一个新的：照着 evaluation/datasets/locomo.py 写个同名文件，"
-            f"实现 load() 和 score()，再登记到这里的 table。")
-    return table[name]
+            f"实现 load() 和 score()，再登记到这里的 DATASETS。")
+    return importlib.import_module(DATASETS[name])
