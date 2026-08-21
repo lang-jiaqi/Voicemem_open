@@ -173,6 +173,7 @@ async def voicemem_llm_tts(pending, send, send_audio):
 
     speaker = asyncio.create_task(speak())
     reply, buf, sent = "", "", 0
+    interrupted = False
     try:
         # 跟 realtime 用同一份指令：两条路必须表现一致，否则换个 --mode
         # 人设和「右脑不许念出来」的约束就悄悄没了。
@@ -187,16 +188,26 @@ async def voicemem_llm_tts(pending, send, send_audio):
                 buf, sent = "", sent + 1
         if buf.strip():
             await queue.put(buf.strip())
+    except asyncio.CancelledError:
+        interrupted = True                      # 用户插话了，这一轮到此为止
     finally:
         await queue.put(None)                   # 生成出错也要让 speak() 收工
 
-    await send({"type": "answer_done"})
-    # 先落记忆再等放完：ingest 排在音频后面的话，用户一听完就关页面（语音场景很
-    # 常见），send_audio 抛 WebSocketDisconnect，这一轮就永远存不进去。
-    # async_facts=True：抽事实走后台，不堵住读麦克风那条线。
-    vm.ingest(pending.text, agent_reply=reply, async_facts=True,
-              audio=pending.audio_path or None)   # 两半一起存
-    await speaker
+    if interrupted:
+        # 别把 speak() 留在后台继续往一条已经停播的连接上发音频
+        speaker.cancel()
+    else:
+        await speaker
+        await send({"type": "answer_done"})
+
+    # 存这一轮：被打断时存的是用户真正听到的那半句。
+    # 先落记忆再收工——ingest 排在音频后面的话，用户一听完就关页面（语音场景很
+    # 常见），这一轮就永远存不进去。async_facts=True：抽事实走后台。
+    try:
+        vm.ingest(pending.text, agent_reply=reply, async_facts=True,
+                  audio=pending.audio_path or None)
+    except Exception as e:
+        print(f"[web] 存这一轮失败：{type(e).__name__}: {e}", flush=True)
 
 
 _RT_PERSONA = (
@@ -333,8 +344,34 @@ async def anticipate(sock, on_frame=None, on_speech=None):
 # ══════════════════ 每种 mode 的会话循环 ══════════════════
 
 async def llm_tts_session(sock):
-    async for pending in anticipate(sock):
-        await voicemem_llm_tts(pending, sock.send_json, sock.send_bytes)
+    """llm_tts 这条路的打断。
+
+    原来是 `async for pending in anticipate(sock): await voicemem_llm_tts(...)`——
+    两个问题叠在一起，打断在结构上就不可能：
+      · on_speech 没传进 anticipate，本地 VAD 听到人声也没人管；
+      · voicemem_llm_tts 最后 `await speaker`，要等全部音频发完才返回。async for
+        在这期间不会去拉下一个，anticipate 就停在那儿不读 socket 了，麦克风帧全
+        堆在缓冲区里。听感就是"说什么都没用，他非要说完"。
+
+    现在回复丢进后台任务，读 socket 的循环一刻不停；听到人声就取消那个任务。
+    """
+    turn = {"task": None}
+
+    async def stop_reply():
+        task = turn["task"]
+        if task is None or task.done():
+            return
+        task.cancel()
+        turn["task"] = None
+        try:
+            await sock.send_json({"type": "answer_interrupt"})   # 前端停播已排队的音频
+        except Exception:
+            pass
+
+    async for pending in anticipate(sock, on_speech=stop_reply):
+        await stop_reply()                    # 上一轮还没说完就被新的一轮顶掉
+        turn["task"] = asyncio.create_task(
+            voicemem_llm_tts(pending, sock.send_json, sock.send_bytes))
 
 
 async def realtime_session(sock):
