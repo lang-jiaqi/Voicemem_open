@@ -1,3 +1,5 @@
+# VoiceMem
+
 <p align="center">
   <img src="assets/Voicemem_logo.png" alt="VoiceMem Logo" width="100%">
 </p>
@@ -8,9 +10,9 @@
 
 <p align="center">
   <a href="https://arxiv.org/abs/2605.19833">技术报告 📖</a> /
-  <a href="https://huggingface.co/datasets/zhifeixie/Voices-in-the-Wild-2M">Voices-in-the-Wild-2M 🤗</a> /
-  <a href="https://huggingface.co/zhifeixie/Mega-ASR">Mega-ASR 权重 🤗</a> /
-  <a href="https://github.com/xzf-thu/Voices-in-the-Wild-Bench">Voices-in-the-Wild-Bench 🏆</a>
+  <a href="https://huggingface.co/zhifeixie/VoiceMem_Default_Models_Env">VoiceMem Utils 🤗</a> /
+  <a href="https://huggingface.co/zhifeixie/VoiceMem_MF_Qwen3_6_35B_A3B_Qlora">VoiceMem Model Families 🤗</a> /
+  <a href="https://huggingface.co/datasets/zhifeixie/VoiceMem-ChatMem400k">ChatMem-400K 🤗</a>
 </p>
 
 <p align="center">
@@ -59,8 +61,8 @@
 * [🤖 VoiceMem 官方记忆模型](#-voicemem-模型系列)
 * [🔌 自定义模型](#-连接自己的语音模型)
 * [📊 评测代码](#-评测)
-* [ 致谢](#-致谢)
-* [ 许可证](#-许可证)
+* [致谢](#致谢)
+* [许可证](#许可证)
 
 ## 🚀 快速开始
 
@@ -319,9 +321,10 @@ python evaluation/run.py \
 
 完整评测流程，以及添加新 Benchmark 的方法，请参阅 **[evaluation/README.md](evaluation/README.md)**。添加一个新的 Benchmark 只需要增加一个文件并实现两个函数。
 
-##  致谢
+## 致谢
 
-我们感谢以下的优秀开源项目之上：
+我们感谢以下优秀的开源项目：
+
 * [mem0](https://github.com/mem0ai/mem0) — 向量记忆引擎
 * [FunASR](https://github.com/modelscope/FunASR) — 基于 `paraformer-zh-streaming` 的流式 ASR
 * [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) — Silero VAD、3D-Speaker 说话人验证，以及备用流式 ASR
@@ -329,7 +332,7 @@ python evaluation/run.py \
 
 VoiceMem 同时使用 OpenAI API 提供 Chat、TTS 和 Realtime 功能。
 
-##  许可证
+## 许可证
 
 VoiceMem 基于 **Apache License 2.0** 开源。
 

@@ -1,17 +1,18 @@
+# VoiceMem
+
 <p align="center">
   <img src="assets/Voicemem_logo.png" alt="VoiceMem Logo" width="100%">
 </p>
 
 <p align="center">
-  <a href="README.md">[中文]</a> | <strong>[English]</strong>
+  <a href="README.md">中文</a> | <strong>English</strong>
 </p>
-
 
 <p align="center">
   <a href="https://arxiv.org/abs/2605.19833">Technical Report 📖</a> /
-  <a href="https://huggingface.co/datasets/zhifeixie/Voices-in-the-Wild-2M">Voices-in-the-Wild-2M 🤗</a> /
-  <a href="https://huggingface.co/zhifeixie/Mega-ASR">Mega-ASR Weights 🤗</a> /
-  <a href="https://github.com/xzf-thu/Voices-in-the-Wild-Bench">Voices-in-the-Wild-Bench 🏆</a>
+  <a href="https://huggingface.co/zhifeixie/VoiceMem_Default_Models_Env">VoiceMem Utils 🤗</a> /
+  <a href="https://huggingface.co/zhifeixie/VoiceMem_MF_Qwen3_6_35B_A3B_Qlora">VoiceMem Model Families 🤗</a> /
+  <a href="https://huggingface.co/datasets/zhifeixie/VoiceMem-ChatMem400k">ChatMem-400K 🤗</a>
 </p>
 
 <p align="center">
@@ -28,20 +29,20 @@
 
 ---
 
-**VoiceMem** is a memory system for voice models. It adds long-term memory to voice agents so they can better understand a user over time.
+We introduce **VoiceMem**, adding the final component to voice models: a memory that helps them understand you better over time. VoiceMem is built on a <strong>streaming dual-brain</strong> architecture and provides **accurate, emotional, personality-aware, low-latency, and low-cost memory services**. This repository will <strong>remain fully open source</strong>.
 
-VoiceMem uses a **streaming dual-brain architecture**. It provides accurate factual memory, emotional and personality-aware memory, low-latency retrieval, and a lightweight memory context.
+A quick overview of VoiceMem:
 
-* **Left Brain:** Manages factual information and maintains strong retrieval performance even when only Top-3 memories are used.
-* **Right Brain:** Manages long-term and short-term emotional information, personality, and relationships. It also connects emotional memory with factual memory from the Left Brain.
-* **Low Latency:** Uses compressed information, hierarchical storage, and streaming retrieval with 0–500 ms speculative prefetching, adding very little extra latency.
-* **Simple and Practical:** A single query uses about 300 memory tokens. All major components, including the underlying memory engine, are decoupled and can be replaced independently.
+* **Left Brain:** Directly manages factual information and maintains strong retrieval performance under a Top-3 memory limit.
+* **Right Brain:** Manages emotional intelligence through short-term and long-term emotional attribution, including cross-entity nodes and joint maintenance with Left Brain information.
+* **Low Latency:** Uses information compression, hierarchical storage, and streaming retrieval with 0–500 ms speculative prefetching, adding very little extra latency.
+* **Simple and Practical:** Each query uses about 300 memory tokens. The architecture is fully decoupled, and every component, including the underlying memory engine, can be replaced independently.
 
 <p align="center">
   <img src="assets/teaser.png" alt="VoiceMem Overview" width="100%">
 </p>
 
-## Demo
+## 🎬 Demo
 
 > **Note:** Please unmute the video before playback.
 
@@ -53,18 +54,17 @@ VoiceMem uses a **streaming dual-brain architecture**. It provides accurate fact
   </video>
 </div>
 
-## Overview
+## 📚 Overview
 
-* [Quick Start](#quick-start)
-* [Architecture](#voicemem-memory-with-streaming-dual-brain-architecture)
-* [Features](#features)
-* [VoiceMem Model Families](#voicemem-model-families)
-* [Voice Chat with Your Own Model](#voice-chat-with-your-own-model)
-* [Benchmarking](#benchmarking)
+* [🚀 Quick Start](#-quick-start)
+* [🧠 VoiceMem Dual-Brain Streaming Architecture](#-voicemem-memory-with-a-streaming-dual-brain-architecture)
+* [🤖 VoiceMem Model Families](#-voicemem-model-families)
+* [🔌 Use Your Own Model](#-voice-chat-with-your-own-model)
+* [📊 Evaluation](#-evaluation)
 * [Acknowledgements](#acknowledgements)
 * [License](#license)
 
-## Quick Start
+## 🚀 Quick Start
 
 ### Installation
 
@@ -72,10 +72,10 @@ VoiceMem uses a **streaming dual-brain architecture**. It provides accurate fact
 git clone https://github.com/lang-jiaqi/Voicemem_open.git
 cd Voicemem_open
 
-# Memory system installation
+# Install the memory system
 pip install voicemem
 
-# Use VoiceMem Model Families
+# Use VoiceMem model families
 pip install "voicemem[slm]"
 ```
 
@@ -124,7 +124,7 @@ result = vm.search("What are my dietary restrictions?")
 
 #### Run VoiceMem in Streaming Mode
 
-VoiceMem can also process audio continuously. You can use the streaming interface in a similar way to a VAD-based audio pipeline.
+The streaming interface continuously processes incoming audio and can be used in a VAD-style audio pipeline.
 
 ```python
 import asyncio
@@ -181,7 +181,7 @@ Then open:
 http://localhost:8787
 ```
 
-## VoiceMem: Memory with Streaming Dual-Brain Architecture
+## 🧠 VoiceMem: Memory with a Streaming Dual-Brain Architecture
 
 **VoiceMem** is a memory system built for real-time voice agents.
 
@@ -191,50 +191,52 @@ Instead of storing every type of memory in a single retrieval database, VoiceMem
   <img src="./docs/images/fig-architecture.webp" alt="VoiceMem Architecture" width="80%">
 </p>
 
-* **Left Brain** organizes factual memory using schemas and entities for precise retrieval.
-* **Right Brain** manages personality, emotion, and relationships through independent and cross-entity memory nodes.
+* **Left Brain** organizes factual memory using schemas and entities for more accurate retrieval.
+* **Right Brain** manages personality, emotion, and relationships using independent and cross-entity memory nodes.
 
 <p align="center">
-  <img src="./docs/images/stages.png" alt="VoiceMem Processing Stages" width="90%">
+  <img src="./docs/images/stages.png" alt="VoiceMem Processing Pipeline" width="90%">
 </p>
 
 The entire pipeline is **streaming**.
 
-While the user is speaking, VoiceMem can continuously segment audio, transcribe speech, extract useful memory, and write structured information into the memory graph.
+While the user is still speaking, VoiceMem continuously segments audio, transcribes speech, extracts useful memories, and writes structured information into the memory graph.
 
-At query time, VoiceMem **routes first, ranks second, and injects only the Top-K memories** into the model context. This keeps the memory context small while retaining relevant information.
+At query time, VoiceMem **routes first, ranks second, and injects only the Top-K memories into the model context**. This keeps the context small while preserving the most relevant information.
 
-### Features
+### Key Features
 
-* 🎯 **Accurate** — Get **91.2% on LoCoMo**, vs. **61.68% for Mem0**, with only **Top-5** memories.
-* ❤️ **Emotional & Personal** — Remember **who the user is and how they feel**, not just what they said. Reach **69.44% on PersonaMem**.
-* 🎧 **Multimodal** — Remember **speech, speakers, sound events, multi-speaker conversations, and music** from real-world audio.
-* ⚡ **Fast** — Respond in **134 ms**, vs. **1,440 ms for Mem0**, with streaming retrieval inside the voice turn.
-* 💰 **Cheap** — Use only **302 memory tokens**, vs. **6,956 for Mem0** and **1,899 for EverMemOS**.
+* 🎯 **Accurate** — Reaches **91.2% on LoCoMo**, compared with **61.68% for Mem0**, using only **Top-5** memories.
+* ❤️ **Emotional & Personal** — Remembers not only **what the user said**, but also **who the user is and how they feel**. Reaches **69.44% on PersonaMem**.
+* 🎧 **Multimodal** — Remembers **speech, speakers, sound events, multi-speaker conversations, and music** from real-world audio.
+* ⚡ **Fast** — Responds in **134 ms**, compared with **1,440 ms for Mem0**, with streaming retrieval inside the voice turn.
+* 💰 **Low Token Usage** — Uses only **302 memory tokens**, compared with **6,956 for Mem0** and **1,899 for EverMemOS**.
 
-### VoiceMem Model Families
+---
 
-We build **ChatMem-400K** through a three-stage pipeline:
+## 🤖 VoiceMem Model Families
+
+We build **ChatMem-400K** through a three-stage OPD training pipeline:
 
 1. **Memory-world construction**
 2. **SLM-validated online on-policy distillation (OPD)**
 3. **Human refinement**
 
-The same pipeline produces **ChatMem-Bench** for evaluation.
+After human editing, the same pipeline produces **ChatMem-Bench**, which evaluates whether a voice model can build a long-term understanding of the user over time.
 
-Our models, including **Qwen2.5-Omni, Qwen3-Omni, and Step-Audio2-Mini**, learn to proactively invoke VoiceMem when memory is useful.
+The open-source VoiceMem model family includes **Qwen2.5-Omni, Qwen3-Omni, and Step-Audio2-Mini**. These models can receive and understand memory information provided by VoiceMem during conversations.
 
 <p align="center">
   <img src="./docs/images/fig-opd.webp" alt="VoiceMem OPD Pipeline" width="90%">
 </p>
 
-## Voice Chat with Your Own Model
+## 🔌 Voice Chat with Your Own Model
 
 You can connect VoiceMem to your own fine-tuned model for real-time voice conversations.
 
 The basic flow is:
 
-**microphone → VoiceMem listens and prefetches relevant memories → your model responds with those memories in context**
+**microphone → VoiceMem listens and prefetches relevant memories → your model reads those memories and generates a response**
 
 ```bash
 pip install funasr sounddevice transformers peft torch
@@ -250,7 +252,7 @@ python examples/04_voice_agent_own_model.py
 
 The default training configuration matches the one used for the released `checkpoint-3318`.
 
-Running the command below with the default settings reproduces the same adapter:
+Running the following command with the default settings reproduces the same adapter:
 
 ```bash
 pip install -e ".[finetune]"
@@ -260,7 +262,7 @@ python finetune/train.py --data data/train.jsonl
 
 See **[finetune/README.md](finetune/README.md)** for the training data format, GPU memory requirements, and instructions for using a different base model.
 
-## Benchmarking
+## 📊 Evaluation
 
 The evaluation pipeline is fully open source and reproducible.
 
@@ -268,9 +270,9 @@ The evaluation pipeline is fully open source and reproducible.
   <img src="./assets/evaluation.png" alt="VoiceMem Evaluation Results" width="100%">
 </p>
 
-### Evaluation
+### Run Evaluation
 
-Run a benchmark with a single command:
+A benchmark can be started with a single command:
 
 ```bash
 export OPENAI_API_KEY=sk-...
@@ -303,9 +305,9 @@ Median retrieval latency: 12 ms
 Median retrieved memory: 298 tokens
 ```
 
-Before running a full evaluation, you can add `--inspect` to check how the dataset is parsed.
+Before running a full evaluation, add `--inspect` to check how the dataset is parsed.
 
-This does not call the model or incur any API cost:
+This mode does not call the model and does not incur API costs:
 
 ```bash
 python evaluation/run.py \
@@ -316,20 +318,20 @@ python evaluation/run.py \
 
 During evaluation, the answering model receives **only the retrieved memories**, not the original conversation history.
 
-Giving the model the full conversation would turn the benchmark into a reading-comprehension task rather than an evaluation of the memory system itself.
+If the model receives the full conversation, the benchmark becomes a reading-comprehension test rather than an evaluation of the memory system itself.
 
-See **[evaluation/README.md](evaluation/README.md)** for the full evaluation protocol and instructions for adding a new benchmark. Adding a benchmark only requires one file and two functions.
+See **[evaluation/README.md](evaluation/README.md)** for the complete evaluation protocol and instructions for adding a new benchmark. Adding a benchmark only requires one file and two functions.
 
 ## Acknowledgements
 
-VoiceMem builds on several excellent open-source projects:
+We thank the following excellent open-source projects:
 
 * [mem0](https://github.com/mem0ai/mem0) — vector memory engine
 * [FunASR](https://github.com/modelscope/FunASR) — streaming ASR with `paraformer-zh-streaming`
 * [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) — Silero VAD, 3D-Speaker speaker verification, and fallback streaming ASR
 * [intfloat/multilingual-e5](https://huggingface.co/intfloat/multilingual-e5-small) — local embeddings and slot classification
 
-VoiceMem also uses OpenAI APIs for chat, TTS, and Realtime functionality.
+VoiceMem also uses OpenAI APIs for Chat, TTS, and Realtime functionality.
 
 ## License
 
