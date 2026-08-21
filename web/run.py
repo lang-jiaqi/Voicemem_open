@@ -191,7 +191,7 @@ class Pending:
 _cut_point = utils.cut_point
 
 
-async def voicemem_llm_tts(pending, send, send_audio):
+async def voicemem_llm_tts(pending, send, send_audio, owner):
     """记忆已在关键路径外预取好：LLM 流式回复 → TTS 流式语音。
 
     TTS 跟生成**并行**：LLM 吐满一句就丢进队列，另一条协程取出来合成、发音频。
@@ -246,11 +246,7 @@ async def voicemem_llm_tts(pending, send, send_audio):
     # 存这一轮：被打断时存的是用户真正听到的那半句。
     # 先落记忆再收工——ingest 排在音频后面的话，用户一听完就关页面（语音场景很
     # 常见），这一轮就永远存不进去。async_facts=True：抽事实走后台。
-    try:
-        vm.ingest(pending.text, agent_reply=reply, async_facts=True,
-                  audio=pending.audio_path or None)
-    except Exception as e:
-        print(f"[web] 存这一轮失败：{type(e).__name__}: {e}", flush=True)
+    remember_turn(pending, reply, owner)
 
 
 
@@ -312,16 +308,20 @@ async def _no_realtime(sock, err):
 # 全在核心 VoiceStream 里。这里只做 demo 该做的：搬 socket 帧、发 partial、把说完
 # 的一轮包成 Pending 交给控制流——demo 就是核心的使用示例，不再平行重写一套。
 
-async def resolve_speaker(state, owner) -> None:
-    """后台算这一轮是谁说的，供**下一轮**判断陌生人。
+def remember_turn(pending, reply: str, owner: dict) -> None:
+    """存这一轮，并顺手记下说话人是谁。
 
-    声纹那套模型一次要 ~2 秒，绝不能挡在回复前面——放线程里跑，算完写进 owner。
+    说话人不用单独算：ingest 内部本来就要跑一次 preprocess（场景/声纹/情绪），
+    返回值里直接带 speaker_id。之前我在热路径上又单独触发了一次完整感知——
+    那套一次 424ms（AST 占 361ms），纯属重复劳动，而且挡在读 socket 前面。
     """
     try:
-        sid = await asyncio.to_thread(lambda: getattr(state, "speaker_id", "") or "")
+        r = vm.ingest(pending.text, agent_reply=reply, async_facts=True,
+                      audio=pending.audio_path or None) or {}
     except Exception as e:
-        print(f"[web] 声纹识别失败：{e}", flush=True)
+        print(f"[web] 存这一轮失败：{type(e).__name__}: {e}", flush=True)
         return
+    sid = r.get("speaker_id") or ""
     if not sid:
         return
     if not owner["id"]:
@@ -329,13 +329,14 @@ async def resolve_speaker(state, owner) -> None:
     owner["last"] = sid
 
 
-async def anticipate(sock, on_frame=None, on_speech=None):
+async def anticipate(sock, on_frame=None, on_speech=None, owner=None):
     """驱动核心流式会话，逐个 yield 确认回合的 Pending。
     on_frame(raw24k)：realtime 用它把原始音频平行喂给 OpenAI（方案 A）。
     on_speech()：本地 VAD 一听到人声就叫一次——realtime 拿它做打断（barge-in）。"""
     stream = vm.stream(spec_min_chars=SPEC_MIN_CHARS, gamble_s=GAMBLE_S, confirm_s=CONFIRM_S)
     last_partial = ""
-    owner = {"id": "", "last": ""}        # 主人的声纹 / 上一轮是谁
+    if owner is None:
+        owner = {"id": "", "last": ""}    # 主人的声纹 / 上一轮是谁
     speech_ms = 0.0                       # 连续听到人声多久了
     while True:
         msg = await sock.receive()
@@ -385,8 +386,7 @@ async def anticipate(sock, on_frame=None, on_speech=None):
                           audio_path=await asyncio.to_thread(
                               save_turn_audio, getattr(st, "_pcm", None)),
                           stranger=stranger)
-            if SPEAKER_GATE:
-                asyncio.create_task(resolve_speaker(st, owner))
+
 
 
 # ══════════════════ 每种 mode 的会话循环 ══════════════════
@@ -404,6 +404,7 @@ async def llm_tts_session(sock):
     现在回复丢进后台任务，读 socket 的循环一刻不停；听到人声就取消那个任务。
     """
     turn = {"task": None, "t0": 0.0}
+    owner = {"id": "", "last": ""}
 
     async def stop_reply():
         task = turn["task"]
@@ -421,11 +422,11 @@ async def llm_tts_session(sock):
         except Exception:
             pass
 
-    async for pending in anticipate(sock, on_speech=stop_reply):
+    async for pending in anticipate(sock, on_speech=stop_reply, owner=owner):
         await stop_reply()                    # 上一轮还没说完就被新的一轮顶掉
         turn["t0"] = time.monotonic()
         turn["task"] = asyncio.create_task(
-            voicemem_llm_tts(pending, sock.send_json, sock.send_bytes))
+            voicemem_llm_tts(pending, sock.send_json, sock.send_bytes, owner))
 
 
 async def realtime_session(sock):
@@ -474,6 +475,7 @@ async def realtime_session(sock):
 
             # 这一轮的状态：谁在说、说了什么、这轮用户的输入是什么
             turn = {"live": False, "reply": "", "pending": None, "t0": 0.0}
+            owner = {"id": "", "last": ""}
 
             def close_turn():
                 """一轮结束（说完或被打断）：把两半对话一起存。被打断时存的是用户
@@ -485,11 +487,7 @@ async def realtime_session(sock):
                 # 存记忆失败不能连累这条会话：close_turn 是在常驻事件泵里调的，
                 # 抛出去会打死那个 Task，而 Task 的异常没人 await 就被静默丢弃——
                 # 表现是"整个会话突然不响应了，日志里一个字都没有"。
-                try:
-                    vm.ingest(p.text, agent_reply=reply, async_facts=True,
-                              audio=p.audio_path or None)
-                except Exception as e:
-                    print(f"[web] 存这一轮失败：{type(e).__name__}: {e}", flush=True)
+                remember_turn(p, reply, owner)
 
             async def pump():
                 """常驻事件泵：OpenAI 的事件流只有这一个消费者。
@@ -559,7 +557,8 @@ async def realtime_session(sock):
 
             pump_task = asyncio.create_task(pump())
             try:
-                async for pending in anticipate(sock, on_frame=on_frame, on_speech=on_speech):
+                async for pending in anticipate(sock, on_frame=on_frame,
+                                                on_speech=on_speech, owner=owner):
                     if turn["live"]:                     # 上一轮还没说完就被新的一轮顶掉
                         await on_speech()
                     turn.update(live=True, reply="", pending=pending, t0=time.monotonic())
