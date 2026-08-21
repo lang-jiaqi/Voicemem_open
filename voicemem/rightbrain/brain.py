@@ -179,6 +179,41 @@ def _reaction_signals(user_text: str, agent_reply: str = ""):
     )
 
 
+#: 值不值得花 LLM 去分析——内心 OS 和 4 类特质抽取各是一次 api 调用，
+#: 而语音场景里大量输入是试麦、应答、打断（"哎呀"/"能听到吗"/"等一下"）。
+#: 这些照样存 heartnote（原话 + 情绪标签，情绪是模型每轮打好的，不额外花钱），
+#: 只是不再为它们编一段共情旁白——prompt 要求"被打动"，模型给不出"没情绪"
+#: 这个答案，于是试麦克风被读成"心里一定很复杂"，噪音还会顺着情绪 slot
+#: 进到人格描述里。
+_FILLER = {
+    "哎呀", "哎", "唉", "啊", "嗯", "嗯嗯", "哦", "噢", "诶", "欸", "喂", "喂喂", "啊喂",
+    "等一下", "等一等", "等等", "稍等", "打断一下",
+    "能听到吗", "听得到吗", "听得见吗", "在吗", "有人吗",
+    "好", "好的", "行", "行吧", "可以", "对", "是", "没有", "不是",
+    "测试", "test", "hello", "hi", "ok", "okay",
+}
+#: 短于这个长度、又没能让左脑抽出任何事实的，一律当填充语。
+_MIN_ANALYZE_CHARS = 8
+
+
+def _worth_analyzing(text: str, has_fact: bool) -> bool:
+    """这句话值不值得再花 LLM。0 成本，只看词表和长度。
+
+    短句不能一律砍——"崩溃""我很伤心"只有 2-4 个字，却正是最该分析的。所以在
+    长度之前先问 anchor_router 的情绪关键词表：文本里有明确情绪词就放行（"还好"
+    "不行""我知道了"匹配不上，"崩溃""伤心"匹配得上，两类分得很干净）。
+    """
+    s = re.sub(r"[^\w\u4e00-\u9fff]", "", text or "")
+    if not s:
+        return False
+    if s.lower() in _FILLER:
+        return False
+    if has_fact or len(s) >= _MIN_ANALYZE_CHARS:
+        return True
+    from voicemem.rightbrain.anchor_router import normalize_emotion_strict
+    return normalize_emotion_strict(text) is not None      # 短，但把情绪说出来了
+
+
 def _rb_graph_hits(rb_graph, user_id: str) -> list["RightBrainHit"]:
     """右脑图(情绪/喜好与厌恶/表达风格/思维模式/应对方式)的 slot description，
     每个有描述的 slot 各是一条画像观察。"""
@@ -420,7 +455,10 @@ class RightBrain:
 
             # content 存原话，inner_os 进 metadata（渲染时作为补充拼在原话
             # 后面，见 _rb_ctx_to_hits）——避免共情改写抹掉数字/名字/时间等细节。
-            inner_os = self._generate_inner_os(text, emotion, entities or [], agent_reply)
+            # 填充语（试麦/应答/打断）不值得为它编一段内心 OS，见 _worth_analyzing。
+            worth = _worth_analyzing(text, has_fact=bool(mid))
+            inner_os = (self._generate_inner_os(text, emotion, entities or [], agent_reply)
+                        if worth else "")
             content = text
 
             # 事件时间用 observed_at（与左脑 time_start 同源），不用写入墙钟
@@ -496,8 +534,11 @@ class RightBrain:
                     tracker.touch(self._user_id, "rb_entity_short", emo_ent.id)
                     tracker.touch(self._user_id, "rb_slot_long", emo_slot.id)
 
-                for slot_name, label in self._extract_rb_traits(text, emotion):
-                    self._write_trait(slot_name, label, rb_mem.id)
+                # 情绪 slot 上面已无条件挂好（模型每轮都打了标）；4 类特质要再花
+                # 一次 LLM，填充语里抽不出真特质，只会往画像里塞噪音。
+                if worth:
+                    for slot_name, label in self._extract_rb_traits(text, emotion):
+                        self._write_trait(slot_name, label, rb_mem.id)
             except Exception as e:
                 print(f"[RBGraph] 右脑图层写入失败: {e}")
             return rb_mem.id
