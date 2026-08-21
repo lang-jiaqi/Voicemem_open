@@ -198,7 +198,10 @@ python finetune/train.py --data data/train.jsonl
 数据格式、显存要求、换基座怎么调，见 **[finetune/README.md](finetune/README.md)**。
 
 
-## Evaluation
+## Benchmarking: Fully open-source and alls reproducible.
+<img src="./assets/evaluation.png" alt="VoiceMem Logo" width="90%">
+
+### Evaluation
 
 一条命令跑完一个 benchmark：
 
