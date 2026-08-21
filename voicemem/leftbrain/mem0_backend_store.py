@@ -360,10 +360,17 @@ class Mem0BackendStore:
             bonus, time_hit = _lexical_time_bonus(q_words, want_dur, want_date, text)
             metadata = {k: v for k, v in e.items()
                         if k not in ("id", "memory", "score", "hash", "user_id", "created_at", "updated_at")}
+            # 事件时间：Ingest 的 observed_at 同时写进了 metadata.time_start 和顶层
+            # created_at，两处都取一下。这里以前什么都没取——created_at 被上面那行
+            # 排除掉，time_start 又嵌在 metadata 里没摊平，于是时间一路存到了库里
+            # 却从没到过 prompt，时序类问题全靠事实正文里碰巧出现的日期。
+            inner = e.get("metadata") or {}
+            observed = str(inner.get("time_start") or e.get("created_at") or "")[:10]
             hits.append(MemorySearchHit(
                 memory_id=mid, text=text, score=cos + bonus,
                 attributed_to=str(e.get("attributed_to") or "user"),
                 metadata=metadata, base_score=cos, time_boost=time_hit,
+                observed_at=observed if observed[:4].isdigit() else "",
             ))
 
         hits.sort(key=lambda h: h.base_score, reverse=True)

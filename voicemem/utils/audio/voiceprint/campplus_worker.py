@@ -28,7 +28,9 @@ def main() -> None:
     _device = sys.argv[1] if len(sys.argv) > 1 else "cpu"
     # 这里是独立子进程（可能跑在另一个 conda 环境里），所以不 import voicemem，
     # 路径解析逻辑与 voicemem/utils/common/paths.py 保持一致：
-    #   VOICEMEM_SPEAKER_MODEL > VOICEMEM_MODELS_DIR/<name> > 仓库根 models/<name>
+    #   VOICEMEM_SPEAKER_MODEL > <models 目录>/speaker/<name> > <models 目录>/<name>
+    # speaker/ 子目录是发布仓库 zhifeixie/VoiceMem_default 的布局；平铺那条是早先
+    # 下载过的人的位置，一并认，免得换了组织方式就突然找不到。
     # 注：旧代码用 parents[2]，那是 voicemem/utils/，指到了一个不存在的目录——
     # 不设 VOICEMEM_SPEAKER_MODEL 时声纹开箱就找不到模型。仓库根是 parents[4]。
     from pathlib import Path
@@ -38,7 +40,8 @@ def main() -> None:
     if not model_path:
         _root = os.environ.get("VOICEMEM_MODELS_DIR")
         _dir = Path(_root) if _root else Path(__file__).resolve().parents[4] / "models"
-        model_path = str(_dir / _NAME)
+        _grouped = _dir / "speaker" / _NAME
+        model_path = str(_grouped if _grouped.exists() else _dir / _NAME)
     if not Path(model_path).exists():
         raise FileNotFoundError(
             f"声纹模型 {_NAME} 找不到：{model_path}\n"

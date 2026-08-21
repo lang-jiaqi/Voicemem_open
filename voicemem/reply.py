@@ -104,6 +104,21 @@ def normalize(fn: Callable) -> Callable:
     return gen
 
 
+async def capture(deltas: AsyncIterator[str], on_done: Callable[[str], None]) -> AsyncIterator[str]:
+    """原样透传每个 delta，说完时把整句交给 ``on_done``。
+
+    agent 说的那半也该进记忆，但不该让调用方多写一行、也不能等收全再吐。
+    被打断时 ``finally`` 交出已吐出去的那部分——用户听到多少就记多少。
+    """
+    parts: list[str] = []
+    try:
+        async for delta in deltas:
+            parts.append(delta)
+            yield delta
+    finally:
+        on_done("".join(parts))
+
+
 def unpack(turn_or_text, memory_context: str = "") -> tuple[str, str]:
     """``vm.reply(turn)`` 的便利：Turn / StreamState 直接拆成 (text, memory_context)。"""
     text = getattr(turn_or_text, "text", None)

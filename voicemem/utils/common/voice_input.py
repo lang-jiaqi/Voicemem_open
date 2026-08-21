@@ -61,6 +61,8 @@ class VoiceInput:
     slots: list[str]
     contents: list[VoiceContent]
     environment: str = ""     # AST/CLAP background sound description, e.g. "background sounds: Washing machine(0.82)"
+    #: agent 那半边（contents 是用户那半边），抽取器靠它消歧
+    agent_reply: str = ""
 
     @classmethod
     def from_dict(cls, d: dict) -> "VoiceInput":
@@ -72,6 +74,7 @@ class VoiceInput:
             time_stamp=ts,
             slots=[str(s) for s in (d.get("slots") or [])],
             contents=[VoiceContent.from_dict(c) for c in (d.get("contents") or [])],
+            agent_reply=str(d.get("agent_reply", "") or ""),
         )
 
     @property
@@ -119,9 +122,11 @@ class VoiceprintRegistry:
     ROLE_USER      = "user"
     ROLE_ASSISTANT = "assistant"
 
-    def __init__(self, registry_path: Path) -> None:
+    def __init__(self, registry_path: Path, entity_resolver: Any = None) -> None:
         self._path = registry_path
         self._entries: dict[str, VoiceprintEntry] = {}
+        #: 人名 -> 认知图 entity_id。由 orchestrator 注入；不注入则退化成原行为。
+        self._resolve_entity = entity_resolver
         self._load()
 
     # ── 读写 ──────────────────────────────────────────────────────────────────
@@ -195,7 +200,25 @@ class VoiceprintRegistry:
         return self.get(voiceprint_id).name
 
     def entity_id(self, voiceprint_id: str) -> str:
-        return self.get(voiceprint_id).entity_id
+        """已绑定就直接返回；没有则按人名去认知图找一次，找到就回填。
+
+        惰性解析而不是在 bind() 里做，是因为自我介绍（"我是小李"）发生在抽取
+        建实体**之前**——bind 那一刻图里通常还没有这个人，当场查必然落空。
+        """
+        entry = self.get(voiceprint_id)
+        if entry.entity_id or not self._resolve_entity:
+            return entry.entity_id
+        # 只查在册的：没 bind 过的声纹 get() 给的是临时 entry，名字就是 id 本身，
+        # 拿它当人名去查图没有意义。查不到的（图里还没建这个人）返回 ""，下次再试。
+        if voiceprint_id not in self._entries or not entry.name:
+            return ""
+        try:
+            eid = self._resolve_entity(entry.name) or ""
+        except Exception:
+            return ""
+        if eid:
+            self.bind(voiceprint_id, name=entry.name, entity_id=eid, role=entry.role)
+        return eid
 
     def all_display_names(self) -> list[str]:
         """所有已绑定真名的人名列表（排除还没 bind 过、name 仍等于 voiceprint_id
@@ -320,6 +343,11 @@ def voice_input_to_messages(
             current_sentences.append(c.sentence)
 
     _flush()
+
+    # agent 那半边接在最后：用户说"就它吧"，指代只有回复里能解开
+    if vi.agent_reply and vi.agent_reply.strip():
+        messages.append({"role": "assistant", "content": vi.agent_reply.strip()})
+
     return messages
 
 
@@ -445,7 +473,9 @@ def ingest_voice_input(
     # 抽取 prompt 里设计好的"Existing Memories 仅用于去重/linked_memory_ids"
     # 这道防线形同虚设——同一件事被反复整条重抽，全指望下游 ConflictResolver
     # 兜底。这里先拿整段 turn 文本粗召回一批，喂给抽取器做去重参考。
-    query_text = "\n".join(str(m.get("content", "")) for m in messages).strip()
+    # 只用用户那半边召回候选：agent 的回复长得多，掺进来会把该比对的旧记忆挤出前 10
+    query_text = "\n".join(str(m.get("content", "")) for m in messages
+                           if m.get("role") != "assistant").strip()
     existing_for_extraction: list[dict[str, str]] = []
     if query_text and hasattr(repo, "search"):
         try:

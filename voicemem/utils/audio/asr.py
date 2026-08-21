@@ -87,8 +87,18 @@ class FunASRStreamingASR:
     STRIDE     = CHUNK_SIZE[1] * 960           # 9600 samples @16k = 600ms
     LOOK_BACK  = dict(encoder_chunk_look_back=4, decoder_chunk_look_back=1)
 
-    def __init__(self, model: str = "paraformer-zh-streaming", device: str | None = None) -> None:
+    #: 离线包里的位置。跟回退那套并列放在 asr/ 下——两个都是流式 ASR，区别只是
+    #: 默认(FunASR，中文更准) / 回退(sherpa，纯 onnx 不依赖 torch)。
+    LOCAL_DIR = "funasr-paraformer-zh-streaming"
+
+    def __init__(self, model: str | None = None, device: str | None = None) -> None:
         from funasr import AutoModel          # 惰性：只有真用流式 ASR 才拉 funasr
+        if model is None:
+            # 有离线包就用本地，没有就交给 funasr 按模型名自己下（848M，会卡在
+            # 用户说的第一句上——所以离线包里带着它，别人拉下来开箱即用）。
+            from voicemem.utils.common.paths import models_dir
+            local = models_dir() / "asr" / self.LOCAL_DIR
+            model = str(local) if (local / "config.yaml").exists() else "paraformer-zh-streaming"
         self.model = AutoModel(model=model, device=device or pick_device(),
                                disable_update=True)
         self.reset()
@@ -133,7 +143,9 @@ class Transcriber:
 
     def __init__(self, device: str) -> None:
         from funasr import AutoModel        # 懒 import：只有用非流式精转写才需要 funasr
-        self.model = AutoModel(model="FunAudioLLM/SenseVoiceSmall", hub="hf",
+        from voicemem.utils.common.paths import hf_model
+        _name = hf_model("emotion", "FunAudioLLM/SenseVoiceSmall", "VOICEMEM_SENSEVOICE_MODEL")
+        self.model = AutoModel(model=_name, hub="hf",
                                device=device, disable_update=True,
                                trust_remote_code=False)
 

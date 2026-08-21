@@ -62,8 +62,13 @@ class ExperienceRepository:
         signals: CurrentSignals | None = None,
         entities: list[str] | None = None,
         emotion: str | None = None,
+        context: str | None = None,
     ) -> MemoryQueryPlan:
-        return self._router.build_query_plan(query, user_id, signals=signals, entities=entities, emotion=emotion)
+        """``context``：agent 上一句（用户正在回应它），只参与锚点、不进 clean_text。"""
+        return self._router.build_query_plan(
+            query, user_id, signals=signals, entities=entities, emotion=emotion,
+            context=context,
+        )
 
     # ── Retrieve ──────────────────────────────────────────────────────────────
 
@@ -115,8 +120,13 @@ class ExperienceRepository:
         evidence_turn_ids: list[str] | None = None,
         evidence_memory_ids: list[str] | None = None,
         memory_id: str | None = None,
+        created_at: str | None = None,
     ) -> RightBrainMemory:
-        """写入一条右脑记忆并挂 anchors。"""
+        """写入一条右脑记忆并挂 anchors。
+
+        ``created_at``：事件真实发生时间（回填/benchmark 场景必传，否则渲染出的
+        日期是写入墙钟，temporal 类问题会被带偏；见 store.upsert_memory）。
+        """
         mem = self._store.upsert_memory(
             user_id, memory_class, content,
             condition=condition,
@@ -125,6 +135,7 @@ class ExperienceRepository:
             evidence_turn_ids=evidence_turn_ids,
             evidence_memory_ids=evidence_memory_ids,
             memory_id=memory_id,
+            created_at=created_at,
         )
         for anchor in anchors:
             self._store.link_anchor(mem.id, user_id, anchor)

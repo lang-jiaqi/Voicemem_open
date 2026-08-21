@@ -45,7 +45,7 @@ async def on_turn(turn):
         print(f"   记忆: {hit.text}")
     if REPLY:
         print(f"🤖 {await vm.reply(turn)}")          # 换自己的模型：VoiceMem(reply=fn)
-    vm.ingest(turn.text, async_facts=True)           # 存这轮，抽事实走后台
+    vm.ingest(turn.text, async_facts=True)           # 存这轮（vm.reply 说过的话自动一起存），抽事实走后台
     print(flush=True)
 
 

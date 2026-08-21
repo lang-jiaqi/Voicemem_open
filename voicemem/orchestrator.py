@@ -34,6 +34,7 @@ from __future__ import annotations
 import os
 import re
 import threading
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -99,6 +100,20 @@ class SearchResult:
     scene_directive: str = ""          # 当前声学场景的回复风格建议
     current_scene: str = ""            # 当前场景 tag，如 "transit"
     timing: dict = None                 # {slot_filter, entity_narrow, rank, rb, total} 单位 ms
+
+    # ── 两个脑各自检索到了什么（面向用户的读法）──────────────────────────────
+    # hits / rb_hits 是带分数和元数据的结构化结果，下面两个是"直接能读能打印"的
+    # 那一层，对应文档里的 result.result_leftbrain / result.result_rightbrain。
+
+    @property
+    def result_leftbrain(self) -> list[str]:
+        """左脑检索到的事实（按相关度排好序）。"""
+        return [h.text for h in self.hits]
+
+    @property
+    def result_rightbrain(self) -> list[str]:
+        """右脑检索到的情感/人格上下文。"""
+        return [h.content for h in self.rb_hits]
 
 
 # 左脑那一整块的候选池构造/救回常量（_RESCUE_K / _POOL_MODE_ENV / _pool_mode /
@@ -216,6 +231,12 @@ class Orchestrator:
         self._lock = threading.Lock()
         self._ingest_count = 0
 
+        # 对话往返：只存用户那半边，"那就按你说的办"是悬空的。回复层每说完一句
+        # 就 remember_reply() 登记，Ingest 取这轮的（左脑消歧）、Search 和右脑取
+        # 上一轮的（情绪归因），所以留两轮就够。
+        # 写在回复协程、读在 Search 线程池，读的一侧拷快照（见 last_agent_reply）。
+        self._exchanges: deque[tuple[str, str]] = deque(maxlen=2)
+
         # ── 左脑组件（组合模式：自持左脑零件 + 显式注入跨域/运行时依赖）───────────
         # 左脑那一整块（slot 过滤/实体缩窄/时间扩候选/向量排序/查询分类/LLM 打标签/
         # slot→entity 图层/子图记账与 checkpoint/schema 描述刷新/冷记忆归档）搬进了
@@ -285,7 +306,8 @@ class Orchestrator:
             llm_text=self._llm_text,
             tracker=self._get_session_tracker,
             repo=self._get_repo,
-            generate_inner_os=lambda text, emotion, entities: self._generate_inner_os(text, emotion, entities),
+            generate_inner_os=lambda text, emotion, entities, agent_reply="": (
+                self._generate_inner_os(text, emotion, entities, agent_reply)),
             extract_rb_traits=lambda text, emotion: self._extract_rb_traits(text, emotion),
             cache=self._cache,
             lock=self._lock,
@@ -317,9 +339,28 @@ class Orchestrator:
             if "registry" not in self._cache:
                 from voicemem.utils.common.voice_input import VoiceprintRegistry
                 self._cache["registry"] = VoiceprintRegistry(
-                    self._memory_root / "voiceprint_registry.json"
+                    self._memory_root / "voiceprint_registry.json",
+                    entity_resolver=self._person_entity_id,
                 )
         return self._cache["registry"]
+
+    def _person_entity_id(self, name: str) -> str:
+        """人名 -> 认知图里 person 实体的 id；查不到返回 ""（只读，不建实体）。
+
+        声纹认出「这是谁」和认知图记住「关于这个人的事」本是两套 id，这里把它们接上：
+        接上之后 speaker_entity_map 才非空，search(speaker_filter=…) 才有边可走。
+        """
+        try:
+            from voicemem.leftbrain.cognitive_graph.store import normalize_name
+            store = self._get_repo()._cognitive_store
+            for e in store.find_entities(self._user_id, name_norm=normalize_name(name)):
+                # 注意取 .value：EntityType 虽是 str 枚举，3.11+ 的 str() 给的是
+                # "EntityType.PERSON" 而不是 "person"。
+                if getattr(e.entity_type, "value", e.entity_type) in ("person", "user"):
+                    return e.id
+        except Exception:
+            pass
+        return ""
 
     # ── audiomem：场景 + 声纹相关懒加载单例 ─────────────────────────────────────
 
@@ -668,9 +709,12 @@ class Orchestrator:
 
         # 右脑检索段已抽进 RightBrain.search、向量排序已抽进 LeftBrain.rank；这里只
         # 保留 Rank ‖ 右脑 并发跑的 ThreadPoolExecutor 结构，两半都换成组件调用。
+        # 用户这轮在回应 agent 上一句，右脑要看得到它（反应信号 + 背景锚点）
+        agent_reply = self.last_agent_reply()
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             rb_future = pool.submit(
-                self._right.search, query, activated_names, emotion, top_k,
+                self._right.search, query, activated_names, emotion, top_k, agent_reply,
             )                                            # 右脑并发开跑
 
             hits = self._left.rank(query, final_ids, top_k, speaker_filter=speaker_filter)
@@ -747,8 +791,14 @@ class Orchestrator:
         alpha = sum(1 for c in text if c.isalpha())
         return alpha > 0 and cjk / max(alpha, 1) < 0.3
 
-    def _generate_inner_os(self, text: str, emotion: str, entities: list[str]) -> str:
-        """用 LLM 把原句转成 AI 第三人称内心 OS 风格，带情绪标签；失败返回空串。"""
+    def _generate_inner_os(self, text: str, emotion: str, entities: list[str],
+                           agent_reply: str = "") -> str:
+        """用 LLM 把原句转成 AI 第三人称内心 OS 风格，带情绪标签；失败返回空串。
+
+        ``agent_reply``：用户说这句之前 agent 说的那句。情绪归因离不开它——同一句
+        "行吧"，接在共情后面和接在甩方案后面是两种情绪；不给上一句，模型只能凭
+        用户这半边猜因果。
+        """
         try:
             from openai import OpenAI
             client = OpenAI(
@@ -786,7 +836,13 @@ class Orchestrator:
                     f"Output: [worried] {pronoun} is losing someone close — once they're gone, who do they call on a hard day?\n"
                     "Output only that one sentence, nothing else."
                 )
-            user_content = f"What the user said: {text}\nEmotion: {emotion}{entity_hint}"
+            reply_line = (agent_reply or "").strip()
+            if reply_line:
+                prior = ("你（AI）上一句说的是" if is_chinese else "What you (the AI) just said")
+                user_content = (f"{prior}: {reply_line[:200]}\n"
+                                f"What the user said: {text}\nEmotion: {emotion}{entity_hint}")
+            else:
+                user_content = f"What the user said: {text}\nEmotion: {emotion}{entity_hint}"
 
             resp = client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -814,6 +870,38 @@ class Orchestrator:
         """流式预处理（音频感知），转发到 AudioPerceiver.preprocess。"""
         return self._audio.preprocess(*a, **k)
 
+    # ── agent 说过的话（对话的另外半边）────────────────────────────────────────
+
+    def remember_reply(self, user_text: str, reply: str) -> None:
+        """登记 agent 刚说了什么。``vm.reply()`` 说完会自动调（见 core.py）；
+        回复不走它的（web demo 的 llm_stream / Realtime 事件流）自己调一次，
+        或者在 ``ingest(text, agent_reply=...)`` 里给，那边会顺手登记。"""
+        reply = (reply or "").strip()
+        if not reply:
+            return
+        pair = ((user_text or "").strip(), reply)
+        if self._exchanges and self._exchanges[-1] == pair:
+            return                      # 同一轮别登记两次（reply() 已记过，ingest 又显式传了一遍）
+        self._exchanges.append(pair)
+
+    def last_agent_reply(self, before_text: str | None = None) -> str:
+        """agent 最近说的那句。``before_text`` 给定时跳过对它的回复，返回它之前
+        那句——用户正在回应的就是那句。"""
+        want = (before_text or "").strip()
+        for user_text, reply in reversed(list(self._exchanges)):
+            if want and user_text == want:
+                continue                # 这是对 before_text 的回复，不是它之前那句
+            return reply
+        return ""
+
+    def _reply_to(self, text: str) -> str:
+        """agent 对「这句用户话」的回复（本轮已经答过时才有），供左脑抽取消歧。"""
+        want = (text or "").strip()
+        for user_text, reply in reversed(list(self._exchanges)):
+            if user_text == want:
+                return reply
+        return ""
+
     def Ingest(
         self,
         text: str,
@@ -824,6 +912,7 @@ class Orchestrator:
         audio_path: str | None = None,
         observed_at: str | None = None,
         async_facts: bool = False,
+        agent_reply: str | None = None,
     ) -> dict:
         """将一条语音输入存入记忆库。
 
@@ -843,6 +932,10 @@ class Orchestrator:
             这句话实际发生的时间（如回填历史对话时传真实日期 "2023-05-08" 或 ISO
             字符串）。不传就用当下时刻；回填历史数据必须显式传，否则时序推理和按
             时间排序会失真。
+        agent_reply:
+            agent 对这句话的回复。不传就自动取 ``vm.reply()`` 登记过的那句，所以
+            "先回复、再存"的标准流程不用改；回复不走 ``vm.reply()`` 的显式给一句。
+            左脑拿它给用户那句消歧，右脑拿**上一轮**的回复做情绪归因。
 
         Returns
         -------
@@ -852,6 +945,12 @@ class Orchestrator:
         import time
 
         ts = observed_at or time.strftime("%H:%M:%S")
+
+        if agent_reply is None:
+            agent_reply = self._reply_to(text)       # 这轮的回复，左脑消歧用
+        else:
+            self.remember_reply(text, agent_reply)   # 自己生成回复的，顺手登记
+        prior_reply = self.last_agent_reply(before_text=text)   # 上一轮的，右脑归因用
 
         # ① 流式预处理：场景/声纹/情绪等全部声学分析都在这一步（见 preprocess）
         p = self.preprocess(text, speaker, emotion, session_id, audio_path)
@@ -880,6 +979,8 @@ class Orchestrator:
             "scene_raw_labels": scene_raw_labels, "person_id": person_id,
             "tune_result": tune_result, "abnormal_hits": abnormal_hits,
             "place_result": place_result, "new_routine": new_routine, "detection": detection,
+            # 在这里定死，async_facts=True 的后台线程才不会被后续轮次串掉
+            "agent_reply": agent_reply or "", "prior_agent_reply": prior_reply or "",
         }
 
         if self._clap_memory_enabled() and audio_path is not None:
@@ -951,6 +1052,8 @@ class Orchestrator:
         place_result = ctx["place_result"]; new_routine = ctx["new_routine"]
         detection = ctx["detection"]
         environment_hint = ctx.get("environment_hint", "")
+        agent_reply = ctx.get("agent_reply", "")
+        prior_reply = ctx.get("prior_agent_reply", "")
 
         import uuid
         from voicemem.utils.common.voice_input import VoiceInput, VoiceContent
@@ -964,6 +1067,7 @@ class Orchestrator:
                 sentence=text, voiceprint_id=speaker, emotion=emotion,
             )],
             environment=environment,
+            agent_reply=agent_reply,       # 作为 assistant 消息一起进事实抽取
         )
 
         # 左脑事实抽取 + 入库（ingest_voice_input）抽进 LeftBrain.ingest_facts；
@@ -987,7 +1091,15 @@ class Orchestrator:
         new_routine = audiomem["new_routine"]
 
         self._write_left_brain(result, text)
-        self._write_right_brain(emotion, result, text, entities, observed_at)
+        heartnote_id = self._write_right_brain(
+            emotion, result, text, entities, observed_at, prior_reply)
+        # 情绪归因：有必要才落一条回应经验。跟 heartnote 分开调——不该被
+        # "有没有识别出情绪"挡住，text_mode 下 emotion 常为空。
+        self._right.learn_from_reaction(
+            text, emotion, entities, prior_reply,
+            memory_id=(result.memory_ids[0] if result.memory_ids else None),
+            observed_at=observed_at, heartnote_id=heartnote_id,
+        )
 
         # 异步清洁：每多 50 条 heartnote 触发一次
         threading.Thread(target=self._check_and_cleanup, daemon=True).start()
@@ -1046,9 +1158,11 @@ class Orchestrator:
         """左脑写入段（LLM 打 slot 标签 + slot→entity 图层），转发到 LeftBrain.write。"""
         return self._left.write(result, text)
 
-    def _write_right_brain(self, emotion, result, text, entities, observed_at) -> None:
-        """右脑写入段，转发到 RightBrain.write。"""
-        return self._right.write(emotion, result, text, entities, observed_at)
+    def _write_right_brain(self, emotion, result, text, entities, observed_at,
+                           agent_reply: str = "") -> str | None:
+        """右脑写入段，转发到 RightBrain.write。``agent_reply`` 是用户这句之前
+        agent 说的那句（情绪归因的上下文）。返回这轮 heartnote 的 id。"""
+        return self._right.write(emotion, result, text, entities, observed_at, agent_reply)
 
     def _run_session_boundary_batch(self) -> None:
         """session 边界批处理：左脑子图判定 + 右脑长期归因。

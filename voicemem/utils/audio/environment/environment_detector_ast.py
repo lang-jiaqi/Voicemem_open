@@ -21,7 +21,13 @@ from voicemem.utils.audio.environment.audioset_labels import (
 )
 
 
-DEFAULT_MODEL = "MIT/ast-finetuned-audioset-10-10-0.4593"
+def _default_model() -> str:
+    from voicemem.utils.common.paths import hf_model
+    return hf_model("scene", "MIT/ast-finetuned-audioset-10-10-0.4593",
+                    "VOICEMEM_ENVIRONMENT_MODEL")
+
+
+DEFAULT_MODEL = _default_model()
 
 
 class ASTEnvironmentDetector:

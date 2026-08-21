@@ -142,6 +142,10 @@ class MemorySearchHit:
     base_score: float = 0.0
     # 这条命中了问题所问的时间类型（问"多久"且自带时长表达 / 问"何时"且自带日期）
     time_boost: bool = False
+    #: 这条记忆记的事**发生在哪天**（YYYY-MM-DD，来自 Ingest 的 observed_at）。
+    #: 没有它，"这事在那事之前吗"这类问题就没有依据——事实正文里通常只有
+    #: "上周""一个多月了"这种相对说法，脱离绝对日期推不出先后。
+    observed_at: str = ""
 
 
 @dataclass

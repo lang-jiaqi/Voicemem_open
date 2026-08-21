@@ -46,14 +46,26 @@ class VoiceMem:
     都经 ``**kw`` 透传，语义与 ``Orchestrator.__init__`` 完全一致。
     """
 
+    #: mode 的对外别名 → 内部名。README 用面向用户的说法（"normal" = 全都要，
+    #: "leftbrain_only" = 只要事实记忆），内部名描述的是加载哪套 util。
+    MODE_ALIASES = {
+        "normal":         "multi_modal",
+        "leftbrain_only": "left_brain_single",
+        "text":           "text_mode",
+    }
+
     def __init__(self, api_key=None, mode="text_mode", memory_root=None,
-                 user_id="voice_user", base_url=None, reply=None, **kw):
-        self._o = Orchestrator(api_key=api_key, mode=mode, memory_root=memory_root,
+                 user_id="voice_user", base_url=None, reply=None,
+                 openai_key=None, top_k=5, **kw):
+        self._o = Orchestrator(api_key=api_key or openai_key,
+                               mode=self.MODE_ALIASES.get(mode, mode),
+                               memory_root=memory_root,
                                user_id=user_id, base_url=base_url, **kw)
         # 回复层是门面级的事（编排层只到记忆结果为止），所以 reply 不往下透传。
         # None → 首次用到时回落到内置 openai provider，见 _reply_fn。
         self._reply_src = reply
         self._reply_norm = None
+        self._top_k = top_k                  # search() 的默认取几条
         self.mode = self._o.mode
         self.utils = self._o.utils
         self.left_brain = self._o._left      # 真组件
@@ -80,8 +92,30 @@ class VoiceMem:
 
     # ── 面向用户的便捷方法（各自一行委托给 Orchestrator）─────────────────────────
 
-    def ingest(self, text, audio=None, **kw): return self._o.Ingest(text, audio_path=audio, **kw)
-    def search(self, query, **kw):            return self._o.Search(query, **kw)
+    def ingest(self, text=None, audio=None, **kw):
+        """记一句话。``ingest("文本")`` 存文本；``ingest(audio="x.wav")`` 只给音频时
+        先本地转写再存（同一段音频照样跑声纹/场景/情绪感知）。两个都给就用给的文本。"""
+        if text is None:
+            if audio is None:
+                raise ValueError("ingest() 要么给 text，要么给 audio")
+            text = self.transcribe(audio)
+        # 没有音频就没有声纹，说话人只能是账号主人本人——用 "user" 这个约定 id
+        # （见 voice_input_to_messages），否则会走到给"未验证声纹"准备的防御标签上，
+        # 存下来的每条事实都变成"Unidentified speaker Speaker 0 是素食主义者"。
+        # 有音频时保持编排层默认，让声纹识别去定说话人（多人场景不能假设是主人）。
+        if audio is None:
+            kw.setdefault("speaker", "user")
+        return self._o.Ingest(text, audio_path=audio, **kw)
+
+    def transcribe(self, audio) -> str:
+        """把一个音频文件整段转写成文本（复用 utils 里那个流式 ASR，不额外拉模型）。"""
+        from voicemem.utils.audio.stream_io import transcribe_file
+        return transcribe_file(self.utils.get("asr"), audio)
+
+    def search(self, query, **kw):
+        kw.setdefault("top_k", self._top_k)
+        return self._o.Search(query, **kw)
+
     def classify(self, query):                return self._o.Classify(query)
     def preprocess(self, text, audio=None):   return self._o.preprocess(text, audio_path=audio)
     def flush(self):                          return self._o.Flush()
@@ -106,10 +140,14 @@ class VoiceMem:
 
         第一个参数可直接给 ``Turn``/``StreamState``（自动拆出 text 与 memory_context），
         也可以给一段文本 + 自己渲染好的 memory_context。
+
+        说完的这句自动登记给记忆层（``capture`` → ``remember_reply``），下次
+        ``ingest()`` 就带上 agent 这半边，调用方一行不用改。
         """
-        from voicemem.reply import unpack
+        from voicemem.reply import capture, unpack
         text, ctx = unpack(turn_or_text, memory_context)
-        return self._reply_fn()(text, ctx)
+        return capture(self._reply_fn()(text, ctx),
+                       lambda answer: self._o.remember_reply(text, answer))
 
     async def reply(self, turn_or_text, memory_context=""):
         """收全的回复：``answer = await vm.reply(turn)``。内部就是把 reply_stream 拼起来。"""

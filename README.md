@@ -2,7 +2,6 @@
   <img src="assets/Voicemem_logo.png" alt="VoiceMem Logo" width="100%">
 </p>
 
----
 
 <p align="center">
   <a href="https://arxiv.org/abs/2605.19833">Technical Report 📖</a> /
@@ -26,8 +25,19 @@
 - **右脑：** 用长短期情绪归因管理「情商」，含交叉节点、与左脑信息联合维护。
 - **低延迟：** 通过压缩信息、分层存储、流式查询（0–500ms 投机预取），几乎不增加延迟。
 - **简单实用：** 单轮查询约 300 token；架构全部解耦，全部组件（含底层记忆引擎）都可更换。
+<p align="center">
+  <img src="assets/teaser.png" alt="VoiceMem Logo" width="100%">
+</p>
 
----
+## Demo
+NOTE: need to unmute first.
+<div align="center">
+  <video
+    src="https://private-user-images.githubusercontent.com/201621992/637588589-34d46638-20db-4943-a88b-b3826c16f156.mp4?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3ODcwNjIwNzIsIm5iZiI6MTc4NzA2MTc3MiwicGF0aCI6Ii8yMDE2MjE5OTIvNjM3NTg4NTg5LTM0ZDQ2NjM4LTIwZGItNDk0My1hODhiLWIzODI2YzE2ZjE1Ni5tcDQ_WC1BbXotQWxnb3JpdGhtPUFXUzQtSE1BQy1TSEEyNTYmWC1BbXotQ3JlZGVudGlhbD1BS0lBVkNPRFlMU0E1M1BRSzRaQSUyRjIwMjYwODE4JTJGdXMtZWFzdC0xJTJGczMlMkZhd3M0X3JlcXVlc3QmWC1BbXotRGF0ZT0yMDI2MDgxOFQxNDAyNTJaJlgtQW16LUV4cGlyZXM9MzAwJlgtQW16LVNpZ25hdHVyZT00ZTdkY2IxYzhiYjk2MzAzMGYxN2MyYjE1YTNjODk1MTMxNWY4ZmRlYzZlNTQzOWM4YzE5YjQ3M2M3MjE0OWQ0JlgtQW16LVNpZ25lZEhlYWRlcnM9aG9zdCZyZXNwb25zZS1jb250ZW50LXR5cGU9dmlkZW8lMkZtcDQifQ.GxzWfZKRHMcGRQe4Kc__YKqJrtNSnUcPIFPnPv7n2zQ"
+    width="1000"
+    controls>
+  </video>
+</div>
 
 ## Overview
 
@@ -58,7 +68,7 @@ pip install "voicemem[slm]"
 
 ```bash
 pip install -U huggingface_hub
-hf download zhifeixie/VoiceMem_default --local-dir ./models
+hf download zhifeixie/VoiceMem_Default_Models_Env --local-dir ./models
 ```
 
 
@@ -119,159 +129,107 @@ async def main():
 asyncio.run(main())
 ```
 
-### 语音 Demo（脑图 + 0–500ms 投机预取）
+### Interactive demo with VoiceMem
 
 ```bash
 python web/run.py    # http://localhost:8787
 ```
 
-## Architecture
+## VoiceMem: Memory with streaming dual-brain archetecture
 
-VoiceMem 是**一层薄门面 + 三个自包含组件**（组合式，参考 [mem0](https://github.com/mem0ai/mem0)）——
-打开 `core.py` 就一眼看懂整个系统，重逻辑都藏在组件里、依赖显式注入、可整块替换：
+**VoiceMem** is a memory system built for real-time voice agents. Instead of treating memory as a single retrieval database, VoiceMem separates it into two complementary brains:
 
-```
-core.py            VoiceMem 门面（对外 ~70 行）
-  ├─ leftbrain/    LeftBrain      事实记忆：实体 + 认知图（slot 分类/检索），底层 mem0 向量库
-  ├─ rightbrain/   RightBrain     情绪记忆：valence-arousal、长短期情绪归因、人格画像、交叉节点
-  ├─ utils/audio/  AudioPerceiver 音频原生感知：声纹 / 声学场景 / 情绪 / 音乐（直接吃波形）
-  └─ stream.py     VoiceStream    流式输入：本地 ASR + VAD + 0–500ms 投机预取
-orchestrator.py    编排实现（把三组件串成 Search/Ingest pipeline）
-```
+<p align="center">
+  <img src="./docs/images/fig-architecture.webp" alt="VoiceMem Logo" width="80%">
+</p>
 
-- **组件可换**：`embedding` / `schema`(分类器) / `memory_engine`(默认 mem0) 等每个能力都有内置默认，
-  传一个函数就换成自己的（本地模型、别的向量库…）。
-- **读写分离**：抽取事实、更新摘要、刷新描述等「慢而智能」的 LLM 活儿都在写入侧；读（检索）路径
-  0 次 LLM、走本地向量，实测 Search 本体 ~10ms。
 
-## 主业务逻辑：实时对话一轮
 
-麦克风逐帧喂进 `vm.stream()`，说完一轮就拿到 `Turn`——**记忆早在你说话时就查好了**，
-关键路径上只剩回复模型。完整可跑的脚本是 **[`example.py`](example.py)**（60 行，
-投机预取的四个时机也写在它的 docstring 里）：
+- **Left Brain** organizes factual memory with schemas and entities for precise retrieval.
+- **Right Brain** models personality, emotion, and relationships through independent and cross-entity memory nodes.
+
+<p align="center">
+  <img src="./docs/images/stages.png" alt="VoiceMem Logo" width="90%">
+</p>
+
+
+The entire pipeline is **streaming**. While the user is still speaking, VoiceMem continuously segments audio, transcribes speech, extracts memory, and writes structured information into the graph. At query time, VoiceMem **routes first, ranks second, and injects only the Top-K memories** into the model context.
+
+### Features
+
+- 🎯 **Accurate** — Get **91.2% on LoCoMo**, vs. **61.68% for Mem0**, with only **Top-5** memories.
+
+- ❤️ **Emotional & Personal** — Remember **who the user is and how they feel**, not just what they said. Reach **69.44% on PersonaMem**.
+
+- 🎧 **Multimodal** — Remember **speech, speakers, sound events, multi-speaker conversations, and music** from real-world audio.
+
+- ⚡ **Fast** — Respond in **134 ms**, vs. **1,440 ms for Mem0**, with streaming retrieval inside the voice turn.
+
+- 💰 **Cheap** — Use only **302 memory tokens**, vs. **6,956 for Mem0** and **1,899 for EverMemOS**.
+
+
+### VoiceMem Model Families
+
+We build **ChatMem-400K** through a three-stage pipeline: **memory-world construction, SLM-validated online on-policy distillation (OPD), and human refinement**. The same pipeline produces **ChatMem-Bench** for evaluation. Our models including **Qwen2.5-Omni, Qwen3-Omni, and Step-Audio2-Mini** learn to proactively invoke VoiceMem when memory is useful.
+
+<p align="center">
+  <img src="./docs/images/fig-opd.webp" alt="VoiceMem Logo" width="90%">
+</p>
+
+## Voicechatting with Voiem Model Families
+
+用微调过的模型做实时语音对话——麦克风 → voicemem 边听边预取记忆 → 模型带着记忆回答：
 
 ```bash
-pip install -e ".[all]" sounddevice
-bash scripts/download_models.sh models
-python example.py                    # 需要麦克风，Ctrl-C 退出
+pip install funasr sounddevice transformers peft torch
+export OPENAI_API_KEY=sk-...          # 只用于写入侧的事实抽取，检索全本地
+
+python scripts/realtime_funasr_qwen.py
 ```
 
-### 回复：两条路
+训一个自己的 adapter。默认超参就是已发布 `checkpoint-3318` 那次用的，照默认跑
+即复现同一个 adapter：
 
-`example.py` 里那行 `await vm.reply(st.turn)` 走的是内置 provider。换成自己的模型就
-多一个参数——两条路的调用口完全一样（`voicemem/reply.py`）：
+```bash
+pip install trl peft datasets accelerate bitsandbytes
 
-```python
-vm = VoiceMem(reply=my_fn)                                  # 路 B：自己的模型/函数
-vm = VoiceMem.from_config({"reply": {"provider": "openai",  # 路 A：内置（OpenAI 兼容）
-                                     "config": {"model": "gpt-4o-mini"}}})
-
-answer = await vm.reply(turn)                     # 收全，返回整串（在 async 函数里）
-async for delta in vm.reply_stream(turn):         # 流式，逐字吐
-    ...
+python finetune/train.py --data data/train.jsonl
 ```
 
-`my_fn(text, memory_context)` 写成同步函数、协程、异步生成器都行，核心自己适配——
-**同步函数会丢进 `asyncio.to_thread`**，不会卡住读麦克风那条线。`vm.reply()` 可以直接
-吃 `Turn`（自动拆 `.text` / `.memory_context`），也可以 `vm.reply("我饿了", ctx)`。
+数据格式、显存要求、换基座怎么调，见 **[finetune/README.md](finetune/README.md)**。
 
-> **TTS 不在核心里**：回复层只产出文本，语音合成仍只在 web demo（`web/utils.py` 的
-> `tts_stream`）。`reply` config 用 demo 那份 `{"llm","tts","realtime"}` 嵌套写法时，
-> 核心只取 `llm`。
 
-## Models
+## Evaluation
 
-每个能力都**可插拔**——本地开源 ↔ API，一行 config 就切换。完整清单（哪个功能有哪些模型选项）见
-**[docs/MODELS.md](docs/MODELS.md)**。速览：
-
-- **语音感知**(ASR / VAD / 声纹 / 声学场景) = **纯本地开源**（`bash scripts/download_models.sh models` 从官方拉）;
-- **记忆**(embedding / slot 分类 / 事实抽取) = **默认 OpenAI API，但都有本地开源替代**（E5 / 本地分类器 / 本地 LLM）;
-- **回复**(对话 LLM) = **核心能力**，内置 OpenAI 兼容 provider，`VoiceMem(reply=fn)` 换自己的；
-  TTS / Realtime 仍在 demo 层（TTS 可本地可 API，Realtime 目前仅 OpenAI）。
-
-```python
-# 一个 dict 配齐：记忆全本地（0 网络），VAD 调阈值
-vm = VoiceMem.from_config({
-    "embedding": {"provider": "local"},          # 本地 E5
-    "slots":     {"provider": "local"},          # 本地分类器，0 LLM
-    "vad":       {"provider": "silero", "config": {"threshold": 0.6}},
-})
-vm = VoiceMem(reply=my_fn, vad=lambda: MyVad())  # 或者直接注入函数/对象
-```
-
-**哪些模型必须下。** `download_models.sh` 下四样，只有 VAD 那份没有自动下载兜底：
-
-| 下的东西 | 谁在用 | 不下行不行 |
-|---|---|---|
-| `silero_vad.onnx` | `vm.stream()` 判「说完了」 | 不下就得注入自己的 VAD（`VoiceMem(vad=…)`） |
-| sherpa 回退 ASR | 只在 `VOICEMEM_ASR=sherpa` 时 | 行，默认 ASR 首次运行自动下 |
-| 3D-Speaker 声纹 | `multi_modal` 的声纹识别 | 行，不开声纹就用不到 |
-| 本地 E5 | `provider: "local"` 的 embedding / slots | 行，首次运行自动下；这步只是预拉方便离线 |
-
-ASR 还能整个换掉：`VOICEMEM_ASR=sherpa` 切回 sherpa-onnx，或用
-[`feed_partial`](#interfaces) 接任意外部 ASR（Whisper / 云 ASR）。
-
-## Demo
-
-### 脑图 demo（浏览器）
-
-**[`web/`](web/)**（`pip install -e ".[web]"`）—— `run.py`（对话核心）+ `utils.py`（管道）
-+ 脑图 `index.html`。本地 ASR + VAD 边听边算，VAD 确认说完时记忆早已在关键路径外预取好。
+一条命令跑完一个 benchmark：
 
 ```bash
 export OPENAI_API_KEY=sk-...
-python web/run.py \
-  --mode llm_tts \
-  --port 8787 \
-  --spec_min_chars 6 \
-  --gamble_ms 200 \
-  --confirm_ms 500
+
+# 先用仓库自带的小样例验证环境（2 段对话 5 个问题）
+python evaluation/run.py --dataset locomo --data evaluation/examples/locomo_sample.json
+
+# 换成真数据集
+python evaluation/run.py --dataset locomo --data data/locomo.json
 ```
-
-| 参数 | 干什么 | 默认 |
-|---|---|---|
-| `--mode` | `llm_tts` = LLM 流→TTS 流；`realtime` = OpenAI 原生语音 | `llm_tts` |
-| `--port` / `--host` | 服务端口 / 监听地址 | `8787` / `0.0.0.0` |
-| `--spec_min_chars` | partial 转写到几个字起投机预取 | `6` |
-| `--gamble_ms` | 静音多久就赌你说完了，补投机一次 | `200` |
-| `--confirm_ms` | 静音多久由 VAD 确认一轮结束，交出 `Turn` | `500` |
-| `--config` | 一个 `.json`，整体覆盖 `run.py` 里那份 `CONFIG` | 无 |
-| `--memory_root` | 记忆库目录 | 内置默认 |
-
-每个参数都能用同名环境变量给默认值（`DEMO_MODE` / `VOICEMEM_PORT` / `VOICEMEM_CONFIG` /
-`VOICEMEM_MEMORY_ROOT`）。浏览器打开 http://localhost:8787 ，WebSocket 协议见
-[docs/PROTOCOL.md](docs/PROTOCOL.md)。
-
-### 不开浏览器：喂一个 wav 跑通整条链
-
-```bash
-python example.py --audio speech.wav --step_ms 600 --confirm_ms 500 --no-reply
-```
-
-`--no-reply` 只出记忆检索、不调回复模型（不花 API 钱）。输出长这样——`[speculate]`
-那行是**你还在说的时候**就跑完的检索：
 
 ```text
-▶ speech.wav  4.7s @ 16000Hz，600ms 一块
-🎙️  你好我叫贾琪我在新加坡国立大
-[speculate] '你好我叫贾琪我在新加坡国立大学读' -> 5 hits  887ms
-🧑 你好我叫贾琪我在新加坡国立大学读书
-   记忆: ...
+locomo  10 段对话 · 152 题
+得分 139/152  =  91.4%
+   multi_hop                88.2%
+   temporal                 85.7%
+   single_hop               95.1%
+检索中位数 12ms · 记忆中位数 298 tokens
 ```
 
-手头没 wav？macOS 上一行造一个：
+跑之前先加 `--inspect`：不花钱、不调模型，只把数据集解析结果打出来确认字段读对了。
 
-```bash
-say -v Tingting -o t.aiff "我是素食主义者，对坚果过敏。" \
-  && afconvert -f WAVE -d LEI16@16000 -c 1 t.aiff speech.wav
-```
+评测只把**检索到的记忆**交给答题模型，不给原始对话——给了原文就成了阅读理解，
+测不出记忆系统。协议细节和「怎么加一个新 benchmark」（一个文件、两个函数）见
+**[evaluation/README.md](evaluation/README.md)**。
 
-## Released Model
 
-VoiceMem 记忆工作流微调的 QLoRA adapter：
-[**LangJiaqi77/Voicemem-Qwen3_6-35B-A3B-QLoRA-v2**](https://huggingface.co/LangJiaqi77/Voicemem-Qwen3_6-35B-A3B-QLoRA-v2)
-（adapter-only，基座 [`Qwen/Qwen3.6-35B-A3B`](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)；
-加载代码、校验、评测见 [`models/voicemem-qwen3.6-35b-a3b-qlora-v2/`](models/voicemem-qwen3.6-35b-a3b-qlora-v2/)）。
+
 
 ## Acknowledgements
 

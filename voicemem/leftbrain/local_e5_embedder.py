@@ -19,7 +19,13 @@ from functools import lru_cache
 
 import numpy as np
 
-_E5_NAME = "intfloat/multilingual-e5-small"
+# 有离线包（models/embedding/）就用本地，否则用 HF id 首次运行自动下
+def _e5_name() -> str:
+    from voicemem.utils.common.paths import hf_model
+    return hf_model("embedding", "intfloat/multilingual-e5-small", "VOICEMEM_E5_MODEL")
+
+
+_E5_NAME = _e5_name()
 
 
 @lru_cache(maxsize=1)
