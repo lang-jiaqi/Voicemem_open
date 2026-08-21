@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""最简单的语音对话：麦克风 → 说完一轮 → 带着记忆回答 → 存进记忆。
+"""Mic -> reply with memory -> store. The smallest voice agent.
 
-一轮里只有生成是等出来的——记忆在你还在说的时候就预取好了（``vm.stream()``
-内部投机检索，本地 E5，0 LLM 0 网络）。
+Only generation is on the critical path: memory is prefetched speculatively while
+you are still speaking, so turn.result is already there when the turn ends.
 
     pip install -e ".[all]" sounddevice
     bash scripts/download_models.sh
     export OPENAI_API_KEY=sk-...
-    python examples/03_voice_chat.py
+    python examples/03_voice_agent.py
 """
 import asyncio
 import os
@@ -22,24 +22,24 @@ SR = 16000
 
 vm = VoiceMem(mode="normal", openai_key=os.environ["OPENAI_API_KEY"])
 stream = vm.stream(src_rate=SR,
-                   on_partial=lambda t: print(f"\r🎙️  {t}", end="", flush=True))
+                   on_partial=lambda t: print(f"\r{t}", end="", flush=True))
 
 
 async def main():
-    mic = queue.Queue()                        # 录音回调只丢数据，不被生成阻塞
+    mic = queue.Queue()          # callback only enqueues, never blocks on generation
     with sd.InputStream(samplerate=SR, channels=1, dtype="float32", blocksize=320,
                         callback=lambda d, *_: mic.put(
                             (np.clip(d[:, 0], -1, 1) * 32767).astype(np.int16).tobytes())):
-        print("🎙️  开始说话…（Ctrl-C 退出）", flush=True)
+        print("listening... (Ctrl-C to quit)", flush=True)
         loop = asyncio.get_running_loop()
         while True:
             st = await stream.feed(await loop.run_in_executor(None, mic.get))
             if not st.turn:
                 continue
             turn = st.turn
-            print(f"\n🧑 {turn.text}")
-            print(f"🤖 {await vm.reply(turn)}")     # turn 自带预取好的 memory_context
-            vm.ingest(turn.text, async_facts=True)  # 存这轮；agent 刚说的话自动一起存
+            print(f"\nyou: {turn.text}")
+            print(f"bot: {await vm.reply(turn)}")   # turn carries the prefetched context
+            vm.ingest(turn.text, async_facts=True)  # the reply is stored alongside it
             print(flush=True)
 
 
@@ -47,4 +47,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n👋 bye")
+        print("\nbye")

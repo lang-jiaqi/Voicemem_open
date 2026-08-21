@@ -1,71 +1,93 @@
 # examples
 
-四个能直接跑的例子，从最小到最完整。
+Five runnable examples, in two groups.
 
 ```bash
 pip install -e .
 export OPENAI_API_KEY=sk-...
 ```
 
-| 例子 | 干什么 | 额外要什么 |
+## 1. VoiceMem as a memory engine
+
+Your program calls it to **store** and **recall**. It does not reply.
+
+| | stores | uses |
 |---|---|---|
-| [`01_text.py`](01_text.py) | 文本模式：存文字、查文字，只用左脑 | — |
-| [`02_audio.py`](02_audio.py) | 音频模式：喂 wav，双脑都写（ASR/声纹/场景/情绪） | `bash scripts/download_models.sh` |
-| [`03_voice_chat.py`](03_voice_chat.py) | 最简单的语音对话：麦克风 → 带记忆回答 → 存 | 同上 + `pip install sounddevice` |
-| [`04_custom_asr_vad.py`](04_custom_asr_vad.py) | 换成自己的 ASR / VAD | — |
+| [`01_memory_text.py`](01_memory_text.py) | a line of text | left brain only |
+| [`02_memory_audio.py`](02_memory_audio.py) | a wav file | both brains, plus ASR / voiceprint / scene / emotion |
 
 ```bash
-python examples/01_text.py
-python examples/02_audio.py speech.wav
-python examples/03_voice_chat.py
-python examples/04_custom_asr_vad.py
+python examples/01_memory_text.py
+python examples/02_memory_audio.py speech.wav
 ```
 
-## 换自己的 ASR / VAD
+Start with `01`. `02` is the same thing with audio input; it needs
+`bash scripts/download_models.sh` for the local models.
 
-`04` 里有两条路，按你的 ASR 是什么形态选：
+## 2. Building a voice agent
 
-**路 1 — 组件替换**。你的 ASR 能一块块吃音频、随时给出「到目前为止的文本」：
+Mic in, memory prefetched while you speak, reply out, turn stored.
+**These two differ only in who generates the reply** — the memory half is identical.
+
+| | reply model | needs |
+|---|---|---|
+| [`03_voice_agent.py`](03_voice_agent.py) | OpenAI (default) | `pip install sounddevice` |
+| [`04_voice_agent_own_model.py`](04_voice_agent_own_model.py) | your fine-tuned Qwen adapter | a 35B base, see the file header |
+
+```bash
+python examples/03_voice_agent.py
+python examples/04_voice_agent_own_model.py
+```
+
+To watch what the stream does internally (partials, each speculation stage),
+see [`example.py`](../example.py) at the repo root — the long-form version of `03`
+that also accepts a wav file.
+
+## 3. Swapping internal components
+
+[`05_custom_asr_vad.py`](05_custom_asr_vad.py) is not a separate application — it is
+**the parts-replacement guide for `03`**. Everything above uses the built-in ASR/VAD;
+this shows how to use yours instead. Two ways:
+
+**Way 1 — swap the components.** For an ASR that eats audio chunk by chunk and can
+report the transcript so far:
 
 ```python
-vm = VoiceMem(asr=lambda: MyASR(), vad=lambda: MyVAD())   # 零参工厂，不是实例
+vm = VoiceMem(asr=lambda: MyASR(), vad=lambda: MyVAD())   # zero-arg factories
 ```
 
-要实现的协议就这几个方法，`samples` 是 np.float32 / 16kHz / 单声道 / [-1, 1]：
+The whole protocol, with `samples` as float32 / 16 kHz / mono / [-1, 1]:
 
 ```python
 class MyASR:
-    def reset(self): ...                 # 一轮开始
-    def feed(self, samples) -> str: ...  # 返回累积文本
-    def flush(self) -> str: ...          # 可选，收尾补字
+    def reset(self): ...                 # start of a turn
+    def feed(self, samples) -> str: ...  # transcript so far
+    def flush(self) -> str: ...          # optional, tail flush
 
 class MyVAD:
     def is_speech(self, samples) -> bool: ...
 ```
 
-**路 2 — 只喂文本**。你的 ASR/VAD 已经在别处跑了（云端、系统自带、另一个进程），
-voicemem 完全不碰音频：
+**Way 2 — feed text only.** Your ASR/VAD already run elsewhere (cloud, OS, another
+process), so VoiceMem never touches audio and loads no audio model:
 
 ```python
-await stream.feed_partial("我对坚果")                  # partial 来一句喂一句
-turn = (await stream.feed_partial("我对坚果过敏", ended=True)).turn
+await stream.feed_partial("I'm allergic")
+turn = (await stream.feed_partial("I'm allergic to nuts", ended=True)).turn
 ```
 
-`ended=True` 就是你的 VAD 说「这句说完了」。这条路不会加载任何音频模型。
+`ended=True` is your VAD saying the utterance is complete.
 
-## 关于记忆库
+## One gotcha: memory stores are not interchangeable
 
-不传 `memory_root` 时所有例子共用同一个库（包目录下的 `results/voice_memory`）。
-想各跑各的就显式指定：
+Without `memory_root` every example shares one store (`results/voice_memory` under
+the package). Point them somewhere else to keep them separate:
 
 ```python
 VoiceMem(..., memory_root="/tmp/my_mem")
 ```
 
-注意 embedding 换了维度就不能共用旧库——比如默认的 OpenAI embedding（1536 维）
-和 `from_config({"embedding": {"provider": "local"}})` 的本地 E5（384 维）各自建库。
-
----
-
-仓库根目录的 [`example.py`](../example.py) 是完整版：麦克风和 wav 两种输入、
-partial 回显、投机预取的各个阶段都打出来。想看流式内部发生了什么看它。
+**Changing the embedding dimension makes an existing store unusable.** The default
+OpenAI embedding is 1536-d; the local E5 from
+`from_config({"embedding": {"provider": "local"}})` is 384-d. Aiming both at the same
+`memory_root` fails with a shape mismatch.

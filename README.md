@@ -183,7 +183,7 @@ We build **ChatMem-400K** through a three-stage pipeline: **memory-world constru
 pip install funasr sounddevice transformers peft torch
 export OPENAI_API_KEY=sk-...          # 只用于写入侧的事实抽取，检索全本地
 
-python scripts/realtime_funasr_qwen.py
+python examples/04_voice_agent_own_model.py
 ```
 
 训一个自己的 adapter。默认超参就是已发布 `checkpoint-3318` 那次用的，照默认跑
