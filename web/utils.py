@@ -104,6 +104,31 @@ def build_app(mode, session, classify, snapshot=None, audio_of=None):
         c = classify(body.query)
         return {"slots": list(c.slots), "entities": list(c.entities)}
 
+    class T(BaseModel):
+        text: str
+
+    @app.post("/api/title")                          # 给 session 起个概括性的名字
+    async def api_title(body: T) -> dict:
+        """用一句话概括这轮对话，给 sidebar 当标题。
+
+        只在第一轮之后叫一次，用最小的模型、限死 16 token——不能为了一个标题
+        拖慢对话，也不该花明显的钱。失败就返回空串，前端回落到用户说的第一句。
+        """
+        try:
+            r = await client.chat.completions.create(
+                model=CHAT_MODEL, max_tokens=16, temperature=0,
+                messages=[
+                    {"role": "system", "content":
+                     "用不超过 12 个字概括这段对话在说什么，做标题用。"
+                     "只输出标题本身，不要引号、不要标点、不要「关于」这类开头。"},
+                    {"role": "user", "content": body.text[:600]},
+                ],
+            )
+            return {"title": (r.choices[0].message.content or "").strip()}
+        except Exception as e:
+            print(f"[web] 生成标题失败：{e}", flush=True)
+            return {"title": ""}
+
     @app.get("/api/memories")                        # 打开页面时先铺已有记忆
     def api_memories() -> dict:
         return snapshot() if snapshot else {"left": [], "right": []}

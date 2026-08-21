@@ -327,11 +327,7 @@
       <div class="block-h">流式输入 · Live input</div>
       <div class="live-text" id="liveInput">…</div>
       <input id="textIn" class="textin" placeholder="或直接打字回车测试（无需麦克风/ASR 模型）" />
-      <div class="tags" id="tags">
-        <span class="tag emo"><b>emotion</b>焦虑</span>
-        <span class="tag ent"><b>entity</b>Alex</span>
-        <span class="tag sch"><b>schema</b>food</span>
-      </div>
+      <div class="tags" id="tags"></div>
     </div>
     <!-- 中：左右脑分别召回 top-k -->
     <div class="block recall">
@@ -1095,6 +1091,54 @@ window.brainAdd = function(side, kind, label, slot){
                      situation_pattern:'exper', profile:'prefer', relation:'exper' };
   const RIGHT_CLUSTER = { emotion:'emotion', exper:'experiences', prefer:'preference' };
   window.SLOT_SUMMARIES = window.SLOT_SUMMARIES || {};   // {slot: 会话级概括}
+
+  /* ---- 本轮的 emotion / entity / schema 标签 ----
+     三个都来自这一轮真实算出来的东西，每轮重画；没有就不显示，
+     不留上一轮的残影，更不留写死的占位。
+       schema  ← /api/classify 的 slot
+       entity  ← /api/classify 的实体
+       emotion ← 右脑命中里带的【x】标记（heartnote 的内心OS 就是这个格式） */
+
+  var curEntities = [];
+  var curEmotion = '';
+  var curScene = '';
+
+  function emotionFromHits(hits) {
+    if (!hits) return '';
+    for (var i = 0; i < hits.length; i++) {
+      var text = hits[i].content || '';
+      var m = text.match(/【([^】]{1,6})】/);
+      if (m) return m[1];
+    }
+    return '';
+  }
+
+  function makeTag(kind, label, value) {
+    var el = document.createElement('span');
+    el.className = 'tag ' + kind;
+    var b = document.createElement('b');
+    b.textContent = label;
+    el.appendChild(b);
+    el.appendChild(document.createTextNode(value));
+    return el;
+  }
+
+  function renderTags() {
+    var box = document.getElementById('tags');
+    box.innerHTML = '';
+    if (curEmotion) box.appendChild(makeTag('emo', 'emotion', curEmotion));
+    if (curEntities.length > 0) box.appendChild(makeTag('ent', 'entity', curEntities[0]));
+    var schema = curScene || (curSlots.length > 0 ? curSlots[0] : '');
+    if (schema) box.appendChild(makeTag('sch', 'schema', schema));
+  }
+
+  function clearTags() {
+    curEntities = [];
+    curEmotion = '';
+    curScene = '';
+    renderTags();
+  }
+
   function railAdd(slot, text){                // 左侧栏板对应槽的列表里也实时追加
     const ul = document.getElementById('mem-'+slot); if(!ul) return;
     const li = document.createElement('li'); li.textContent = text.slice(0,42); li.className='new';
@@ -1131,13 +1175,9 @@ window.brainAdd = function(side, kind, label, slot){
     window.vm.setRecall('l', left);
     window.vm.setRecall('r', right);
     // 标签：场景(schema) + 情绪 + 实体
-    const tags=[];
-    const emo = (m.right_brain_hits||[]).find(h=>h.source==='emotion_trait'||h.source==='current_signal');
-    if(emo) tags.push({k:'emo',b:'emotion',v:(emo.content||'').slice(0,10)});
-    const ent = (m.left_brain||[]).map(h=>h.attributed_to).find(a=>a && a!=='user' && a!=='User');
-    if(ent) tags.push({k:'ent',b:'entity',v:ent});
-    if(m.current_scene) tags.push({k:'sch',b:'schema',v:m.current_scene});
-    if(tags.length) $('tags').innerHTML = tags.map(t=>`<span class="tag ${t.k}"><b>${t.b}</b>${t.v}</span>`).join('');
+    curEmotion = emotionFromHits(m.right_brain_hits);
+    curScene = m.current_scene || '';
+    renderTags();
     // 脑图生长：左脑事实 → 按 SlotV2 槽归到对应簇；右脑命中 → 右半球对应类型节点
     const slots = curSlots.length ? curSlots : ['daily_life'];
     (m.left_brain||[]).slice(0,4).forEach((h,i)=> growLeft(h.text, slots[i % slots.length]));
@@ -1171,7 +1211,13 @@ window.brainAdd = function(side, kind, label, slot){
         addTurn('user', msg.text);
         // 分类本轮文本 → SlotV2 槽（左脑生长据此归槽）；同源 :8000 调 facade
         fetch('/api/classify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:msg.text})})
-          .then(r=>r.json()).then(d=>{ curSlots = (d.slots&&d.slots.length)? d.slots : []; }).catch(()=>{});
+          .then(function(r){ return r.json(); })
+          .then(function(d){
+            curSlots = (d.slots && d.slots.length) ? d.slots : [];
+            curEntities = (d.entities && d.entities.length) ? d.entities : [];
+            renderTags();
+          })
+          .catch(function(){});
         break;
       case 'memory_hits': onMemoryHits(msg); break;
       case 'answer_start': setVoiceState('ai'); replyText=''; $('reply').textContent=''; if(playCtx&&playCtx.state==='suspended')playCtx.resume(); break;
@@ -1397,7 +1443,7 @@ window.brainAdd = function(side, kind, label, slot){
   var nextId = 1;
 
   function newSession() {
-    var s = { id: nextId, title: '新对话', turns: [] };
+    var s = { id: nextId, title: '新对话', turns: [], named: false };
     nextId = nextId + 1;
     sessions.unshift(s);      // 新的排最前
     currentId = s.id;
@@ -1423,12 +1469,40 @@ window.brainAdd = function(side, kind, label, slot){
     if (!text) return;
     var s = currentSession();
     s.turns.push({ role: role, text: text });
-    // 标题：第一句用户说的话
-    if (s.title === '新对话' && role === 'user') {
-      s.title = text.length > 22 ? text.slice(0, 22) + '…' : text;
+    // 先用用户说的第一句顶着，助手答完再换成概括出来的标题
+    if (!s.named && role === 'user') {
+      s.title = text.length > 20 ? text.slice(0, 20) + '…' : text;
+    }
+    if (!s.named && role === 'ai') {
+      nameSession(s);
     }
     renderSessions();
     renderChat();
+  }
+
+  // 让模型用一句话概括这段对话，当 sidebar 的标题。
+  // 异步的——标题晚一秒出来无所谓，不能挡着对话。
+  async function nameSession(s) {
+    s.named = true;                       // 只叫一次，别每轮都花钱
+    var lines = [];
+    for (var i = 0; i < s.turns.length; i++) {
+      var who = s.turns[i].role === 'user' ? '用户' : '助手';
+      lines.push(who + '：' + s.turns[i].text);
+    }
+    try {
+      var res = await fetch('/api/title', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: lines.join('\n') })
+      });
+      var data = await res.json();
+      if (data.title) {
+        s.title = data.title;
+        renderSessions();
+      }
+    } catch (err) {
+      console.warn('[title] 生成失败，沿用第一句', err);
+    }
   }
 
   function selectSession(id) {
