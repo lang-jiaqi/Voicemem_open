@@ -131,6 +131,15 @@ conversation itself rather than about the user. Do NOT extract:
 The test: would this still be useful to know a week from now, in a different
 conversation? If not, do not extract it. Extracting nothing from a turn is a valid
 and common outcome — an empty result is better than a worthless memory.
+
+# LANGUAGE
+
+Write each memory in the SAME language the user spoke it in. A Chinese utterance
+becomes a Chinese memory, an English one an English memory. Never translate.
+
+Retrieval is embedding-based: a Chinese question and an English memory about the
+same thing are far apart in vector space, so a translated memory quietly becomes
+unfindable. Keep proper nouns and product names as the user said them.
 """
 
 _ATTRIBUTE_ADDENDUM = """
