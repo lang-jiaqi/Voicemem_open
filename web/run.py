@@ -530,6 +530,55 @@ def _rb_cluster(m) -> str:
                       meta.get("emotion", ""))
 
 
+def fact_index(uid: str) -> dict:
+    """左脑记忆 id → 事实原文。
+
+    原文在向量库里，认知图的 memories 表只有 id/slot/热度这些，取不到文本——
+    一开始用 get_memory_record 取，结果每条 heartnote 的起因都是空的。
+    """
+    try:
+        entries = vm._o._get_repo()._vector_store.list_entries(user_id=uid)
+        return {e["id"]: e["text"] for e in entries}
+    except Exception as e:
+        print(f"[web] 读左脑事实失败：{e}", flush=True)
+        return {}
+
+
+def right_brain_tree(uid: str, facts: dict) -> list:
+    """右脑真实的三层结构：slot → entity → 挂在下面的 heartnote。
+
+    脑图上的节点是 **entity**（"委屈""讨厌坚果和过敏""选择沉默忍耐"），不是
+    一条条 heartnote —— entity 才是右脑归纳出来的那个"点"，heartnote 是支撑它
+    的证据。每条 heartnote 再带上引发它的左脑事实，这样"为什么委屈"点两下就能看到。
+
+    只读，全部走 graph_store 的公开方法。
+    """
+    graph = vm._o._right._rb_graph_store()
+    repo = vm._o._right._rb_repo()
+    notes = {}
+    for m in repo.list_all(uid):
+        meta = getattr(m, "metadata", None) or {}
+        notes[m.id] = {
+            "text": m.content,
+            "emotion": meta.get("emotion", ""),
+            "cause": facts.get(meta.get("left_memory_id", ""), ""),
+        }
+
+    out = []
+    for slot in graph.list_slots(uid):
+        cluster = SLOT_TO_CLUSTER.get(slot.name, "experiences")
+        for ent in graph.get_entities_for_slot(uid, slot.id):
+            mids = graph.get_memories_for_entity(ent.id)
+            out.append({
+                "cluster": cluster,
+                "slot": slot.name,
+                "text": ent.name,                      # 脑图上显示的就是这个
+                "desc": getattr(ent, "description", "") or "",
+                "notes": [notes[i] for i in mids if i in notes],
+            })
+    return out
+
+
 def memory_snapshot(limit: int = 48) -> dict:
     """库里已有的记忆，供前端在打开页面时把脑图先铺满。
 
@@ -565,8 +614,7 @@ def memory_snapshot(limit: int = 48) -> dict:
     except Exception as e:
         print(f"[web] 左脑快照读取失败：{e}", flush=True)
     try:
-        for m in vm._o._right._rb_repo().list_all(uid)[:limit]:
-            right.append({"text": m.content, "cluster": _rb_cluster(m)})
+        right = right_brain_tree(uid, fact_index(uid))
     except Exception as e:
         print(f"[web] 右脑快照读取失败：{e}", flush=True)
     return {"left": left, "right": right}

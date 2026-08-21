@@ -861,11 +861,17 @@ function updateCard(t){
       cId.textContent = '#'+String(1000+n.id*7%8999).padStart(4,'0');
       cSw.style.borderColor = PAL[n.k];
       const s = SRC[n.k];
+      const rbSlot = window.rbSlotOf && window.rbSlotOf(n.id);
       cSrc.textContent = n.k==='label' ? ('cluster · '+n.cnt+' items')
+                       : rbSlot        ? ('right brain · ' + rbSlot)
                        : (s.endsWith('00:') ? s+String(10+n.id%49).padStart(2,'0') : s);
       // 内容区：簇 → 描述；实体/记忆节点 → 该节点的记忆文本(n.w)；无内容给占位
+      // 右脑节点：除了这个"点"本身，还要显示它是怎么来的——挂在下面的一条条
+      // 感受，以及每条感受对应的那件事。光说"用户感到委屈"没有信息量。
+      const rb = window.rbDetailOf && window.rbDetailOf(n.id);
       cBody.textContent = n.k==='label' ? ((window.SLOT_SUMMARIES && window.SLOT_SUMMARIES[n.w]) || SLOT_DESC[n.w] || n.w)
                         : n.k==='user'  ? '账号主人 · this account'
+                        : rb            ? rb
                         : (n.w || '（暂无记忆内容）');
     }
     const w = card.offsetWidth, h = card.offsetHeight;
@@ -1159,6 +1165,7 @@ window.brainAdd = function(side, kind, label, slot){
        entity  ← /api/classify 的实体
        emotion ← 右脑命中里带的【x】标记（heartnote 的内心OS 就是这个格式） */
 
+  var rbDetail = {};        // 节点 id → {slot, notes:[{text, emotion, cause}]}
   var curEntities = [];
   var curEmotion = '';
   var curScene = '';
@@ -1246,6 +1253,26 @@ window.brainAdd = function(side, kind, label, slot){
     }
     console.log('[graph] 按实体连了', linked, '条关系线');
   }
+
+
+  // 给脑图的悬停卡片用：这个右脑节点挂了哪些感受、每条感受为什么。
+  window.rbSlotOf = function (id) {
+    return rbDetail[id] ? rbDetail[id].slot : '';
+  };
+
+  window.rbDetailOf = function (id) {
+    var d = rbDetail[id];
+    if (!d || d.notes.length === 0) return '';
+    var lines = [];
+    for (var i = 0; i < d.notes.length && i < 4; i++) {
+      var n = d.notes[i];
+      var line = (n.emotion ? '【' + n.emotion + '】' : '') + n.text;
+      if (n.cause) line = line + '\n   ← ' + n.cause;
+      lines.push(line);
+    }
+    if (d.notes.length > 4) lines.push('…还有 ' + (d.notes.length - 4) + ' 条');
+    return lines.join('\n');
+  };
 
   function railAdd(slot, text){                // 左侧栏板对应槽的列表里也实时追加
     const ul = document.getElementById('mem-'+slot); if(!ul) return;
@@ -1784,7 +1811,15 @@ window.brainAdd = function(side, kind, label, slot){
       if(!r.ok) return;
       const m = await r.json();
       linkByEntity(m.left || []);
-      for(const e of (m.right||[])) growRightIn(e.cluster||'experiences', e.text);
+      // 右脑铺的是 slot→entity 那一层的 entity（"委屈""讨厌坚果和过敏"），
+      // 挂在下面的 heartnote 存起来，点开节点时显示"感受 + 为什么"。
+      for (var k = 0; k < (m.right || []).length; k++) {
+        var item = m.right[k];
+        var nid = growRightIn(item.cluster || 'experiences', item.text);
+        if (nid !== undefined) {
+          rbDetail[nid] = { slot: item.slot, notes: item.notes || [] };
+        }
+      }
       console.log('[seed] 已有记忆 left=',(m.left||[]).length,'right=',(m.right||[]).length);
     }catch(e){ console.warn('[seed] 读取已有记忆失败', e); }
   })();
