@@ -199,7 +199,7 @@ python finetune/train.py --data data/train.jsonl
 
 
 ## Benchmarking: Fully open-source and alls reproducible.
-<img src="./assets/evaluation.png" alt="VoiceMem Logo" width="90%">
+<img src="./assets/evaluation.png" alt="VoiceMem Logo" width="100%">
 
 ### Evaluation
 
