@@ -72,6 +72,7 @@ ARGS = _parse(None if __name__ == "__main__" else [])
 import utils                                         # noqa: E402  同目录管道层
 from voicemem import VoiceMem                        # noqa: E402
 
+BARGE_DEBUG = os.environ.get("BARGE_DEBUG", "1") != "0"   # 打断为什么没触发：看这几行日志
 MODE = ARGS.mode                                     # llm_tts | realtime
 SPEC_MIN_CHARS = ARGS.spec_min_chars                 # partial 起投机
 GAMBLE_S  = ARGS.gamble_ms / 1000                    # 赌说完
@@ -138,6 +139,7 @@ class Pending:
     spoken: bool = True          # True=语音轮（音频已进 realtime 缓冲），False=打字轮
     audio_path: str = ""         # 这一轮落盘的 wav；ingest 拿它做场景/音乐/声纹感知，
                                  # 并在 audio_archive 里跟记忆绑定，之后能原样放回来
+    stranger: bool = False       # 声纹认出说话的不是这个记忆库的主人
 
 
 # ══════════════════ 两条控制流（各 ~10 行，只消费预取好的 Pending）══════════════════
@@ -174,7 +176,7 @@ async def voicemem_llm_tts(pending, send, send_audio):
         # 跟 realtime 用同一份指令：两条路必须表现一致，否则换个 --mode
         # 人设和「右脑不许念出来」的约束就悄悄没了。
         async for d in utils.llm_stream(pending.text,
-                                        _realtime_instructions(pending.memory_context),
+                                        _realtime_instructions(pending.memory_context, pending.stranger),
                                         REPLY):
             reply += d
             buf += d
@@ -208,9 +210,16 @@ _RT_PERSONA = (
 )
 
 
-def _realtime_instructions(memory_context: str) -> str:
+_STRANGER = ("说话的不是你认识的那个人——声纹对不上。你对他没有任何记忆。"
+             "别把别人的事讲给他听，也别猜他是谁。就当第一次见面，"
+             "友好但如实地说你还不认识他。")
+
+
+def _realtime_instructions(memory_context: str, stranger: bool = False) -> str:
     """人设 + 这一轮检索到的记忆。要说清楚这是「你记得的事」，否则模型会把它当成
     背景资料念出来，而不是当成自己对这个用户的记忆自然地用。"""
+    if stranger:
+        return f"{_RT_PERSONA}\n\n{_STRANGER}"
     if not memory_context:
         return _RT_PERSONA
     return f"{_RT_PERSONA}\n\n{memory_context}"
@@ -234,7 +243,7 @@ async def start_realtime_turn(pending, conn, send):
     # 后者是会话级设置，实测更新完模型这一轮根本读不到（问"我的猫叫什么"，库里
     # 明明检索到了"叫墨墨"，模型还答"你刚提过但我没听清"）。
     await conn.response.create(response={
-        "instructions": _realtime_instructions(pending.memory_context),
+        "instructions": _realtime_instructions(pending.memory_context, pending.stranger),
     })
     await send({"type": "answer_start"})
 
@@ -280,6 +289,7 @@ async def anticipate(sock, on_frame=None, on_speech=None):
     on_speech()：本地 VAD 一听到人声就叫一次——realtime 拿它做打断（barge-in）。"""
     stream = vm.stream(spec_min_chars=SPEC_MIN_CHARS, gamble_s=GAMBLE_S, confirm_s=CONFIRM_S)
     last_partial = ""
+    owner = {"id": ""}                    # 这场对话第一个开口的声纹
     while True:
         msg = await sock.receive()
         if msg.get("type") == "websocket.disconnect":         # 关页面/刷新：收工
@@ -298,13 +308,25 @@ async def anticipate(sock, on_frame=None, on_speech=None):
         st = await stream.feed(raw)                           # 核心：ASR + VAD + 投机预取
         if st.state == "<speak>" and on_speech:
             await on_speech()                                 # 助手还在说 → 打断它
+        if BARGE_DEBUG and st.state == "<speak>":
+            print("[barge] 本地VAD 听到人声", flush=True)
         if st.text.strip() and st.text != last_partial:
             last_partial = st.text
             await sock.send_json({"type": "partial_transcript", "text": st.text, "replace": True})
         if st.turn:                                           # VAD 确认说完 → 记忆早已预取好
             last_partial = ""
-            yield Pending(st.turn.text, st.turn.memory_context, st.turn.result,
-                          spoken=True, audio_path=save_turn_audio(getattr(st, "_pcm", None)))
+            # 谁在说话。第一个开口的人算这场对话的主人；之后换了另一个声纹，
+            # 就是陌生人——不能把主人的记忆讲给他听（"我是谁？"→"你是Jiaqi"
+            # 这个 bug 就是因为检索从不看说话人）。
+            sid = getattr(st, "speaker_id", "") or ""
+            if sid and not owner["id"]:
+                owner["id"] = sid
+            stranger = bool(sid and owner["id"] and sid != owner["id"])
+            yield Pending(st.turn.text,
+                          "" if stranger else st.turn.memory_context,
+                          st.turn.result, spoken=True,
+                          audio_path=save_turn_audio(getattr(st, "_pcm", None)),
+                          stranger=stranger)
 
 
 # ══════════════════ 每种 mode 的会话循环 ══════════════════
@@ -397,6 +419,8 @@ async def realtime_session(sock):
                             print(f"[web] realtime 事件错误：{err or ev}", flush=True)
                     elif t.endswith("input_audio_buffer.speech_started"):
                         # OpenAI 的 VAD 听到人声：它那侧已经掐了回复，我们同步收尾
+                        if BARGE_DEBUG:
+                            print(f"[barge] OpenAI VAD 听到人声 (live={turn['live']})", flush=True)
                         if turn["live"]:
                             turn["live"] = False
                             await sock.send_json({"type": "answer_interrupt"})
@@ -412,11 +436,18 @@ async def realtime_session(sock):
             async def on_speech():
                 """用户在助手说话时开口 → 打断。幂等：live 一置 False 就不再触发。"""
                 if not turn["live"]:
+                    if BARGE_DEBUG:
+                        print("[barge] 有人声但助手没在说，忽略", flush=True)
                     return
+                if BARGE_DEBUG:
+                    print("[barge] ★ 打断：本地VAD 触发", flush=True)
                 turn["live"] = False
-                await conn.response.cancel()
-                await sock.send_json({"type": "answer_interrupt"})   # 前端停播已排队的音频
+                # 先通知前端停播——这是本地操作，立刻生效；而 response.cancel() 要
+                # 等一次 OpenAI 往返。之前顺序反了，人插话后还得听完那一个往返的
+                # 时间，听感就是"打断没用，他非要说完"。
+                await sock.send_json({"type": "answer_interrupt"})
                 close_turn()
+                await conn.response.cancel()
 
             pump_task = asyncio.create_task(pump())
             try:

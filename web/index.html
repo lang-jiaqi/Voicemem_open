@@ -164,8 +164,11 @@
   .rail-body{flex:1;overflow:auto;padding:14px 14px 24px;transition:opacity .2s}
   #app.rail-collapsed .rail-body,#app.rail-collapsed .rail-top h1{opacity:0;pointer-events:none}
   /* 流线动效：常驻，没声音时静态呼吸，有输入时大幅波动 */
-  #orb{display:block;flex:0 0 auto;width:112px;height:112px;margin:0 auto 2px;
-    opacity:.6;transition:opacity .5s ease;pointer-events:none;border-radius:50%}
+  /* 占中间列 40% 高；aspect-ratio 保证它始终是正圆（画布 backing 是 264×264，
+     CSS 只管显示尺寸）。min-height 0 让它在窄屏上能被压下去而不是撑破布局。 */
+  #orb{display:block;flex:0 1 40%;height:40%;min-height:0;width:auto;aspect-ratio:1/1;
+    margin:0 auto 4px;opacity:.6;transition:opacity .5s ease;pointer-events:none;
+    border-radius:50%}
   #orb.on{opacity:1}
   .play{margin:0 6px;padding:0 5px;background:none;border:1px solid rgba(255,255,255,.28);
     border-radius:3px;color:#8fc6ff;font-size:10px;line-height:1.5;cursor:pointer}
@@ -197,7 +200,8 @@
      省下的给回复——那才是要让人读的地方。 */
   .io-in{flex:0 0 auto}
   .recall{flex:0 0 auto;max-height:190px}
-  .io-out{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+  /* 回复区保底：窗口矮时宁可把上面那个圆压小，也不能让回复只剩一条缝 */
+  .io-out{flex:1 1 auto;min-height:180px;display:flex;flex-direction:column}
   .live-text{font-family:var(--serif);font-size:15px;line-height:1.5;color:#eef1f7;min-height:23px}
   .textin{width:100%;box-sizing:border-box;margin-top:10px;font-size:13px;padding:8px 10px;
     border:1px solid var(--line);border-radius:8px;background:#12151b;color:#e8ecf5;font-family:var(--serif)}

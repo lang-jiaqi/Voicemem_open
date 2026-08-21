@@ -70,6 +70,32 @@ class ExtractedAdditiveMemory:
         )
 
 
+#: 抽取模型反复无视提示词硬塞进来的两类垃圾，按词面拦掉。
+#:
+#: 为什么非要在代码里拦：上游提示词开篇就是"每一条可记的信息都必须捕获，漏抽就是
+#: 丢上下文"，我们在 addendum 里写的"别抽请求/别抽助手自己的话"压不过它——实测
+#: 改了两版提示词都照抽不误。
+#:
+#: 为什么这两类特别有害：它们的措辞跟当前这轮对话几乎一样，所以下一个问题一来就
+#: 得高分，直接把真正相关的记忆挤出 top-k。实测"给我推荐几个菜"存进去之后，下次
+#: 再问吃什么，过敏那条就掉出前五，模型于是推荐了含肉的菜。
+_JUNK_PATTERNS = (
+    # 助手自己说的话被当成关于用户的事实
+    "助手推荐", "助手建议", "助手提供", "助手回答", "助手表示", "助手告诉",
+    "assistant recommended", "assistant suggested", "assistant provided",
+    "assistant replied", "assistant explained", "assistant told",
+    # 这一轮的临时请求，不是长期事实
+    "询问推荐", "请求推荐", "要求推荐", "询问建议", "请求建议",
+    "asked for recommendations", "requested recommendations",
+    "asked for suggestions", "wants suggestions", "is asking for",
+)
+
+
+def _is_junk(text: str) -> bool:
+    low = text.lower()
+    return any(pat in text or pat in low for pat in _JUNK_PATTERNS)
+
+
 def parse_additive_memory_response(raw_json: str) -> list[ExtractedAdditiveMemory]:
     data = json.loads(raw_json)
     if not isinstance(data, dict):
@@ -85,6 +111,9 @@ def parse_additive_memory_response(raw_json: str) -> list[ExtractedAdditiveMemor
             continue
         t = (item.get("text") or "").strip()
         if not t:
+            continue
+        if _is_junk(t):
+            print(f"[extract] 丢弃（助手自己的话/一次性请求）：{t[:40]}", flush=True)
             continue
         out.append(ExtractedAdditiveMemory.from_dict(item))
     return out
@@ -127,6 +156,16 @@ conversation itself rather than about the user. Do NOT extract:
 - Anything whose only content is that something was said or asked. Never write a
   memory of the form "User asked X" or "Assistant said X" unless X itself is a fact
   about the user's world.
+- The user's request for this turn. "User wants dinner suggestions", "User asked for
+  restaurant recommendations" — wanting something right now is not a lasting fact.
+  A standing preference is ("User only drinks pour-over coffee"); a one-off ask is not.
+- The assistant's own answer: suggestions it made, options it listed, information it
+  looked up. Those are the assistant's output, not facts about the user. Extract from
+  an assistant turn only when the user CONFIRMED something about themselves in it.
+
+These two are the most damaging kind of junk: they are worded like the current
+conversation, so they score high on the very next query and push the real memories
+out of top-k — the allergy stops being retrieved right when it matters.
 
 The test: would this still be useful to know a week from now, in a different
 conversation? If not, do not extract it. Extracting nothing from a turn is a valid
