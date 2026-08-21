@@ -1346,8 +1346,20 @@ window.brainAdd = function(side, kind, label, slot){
   }
 
   // ---- playback（复用 orb.html 机制）----
+  // 浏览器只允许在用户手势里启动 AudioContext。之前是等第一块音频到了才 new，
+  // 那时候早不在点击上下文里了，创建出来是 suspended 状态——不报错、也没声音。
+  // answer_start 里那句 resume() 也救不回来：那会儿 playCtx 还是 null。
+  function ensurePlayback(){
+    if(!playCtx) playCtx = new (window.AudioContext||window.webkitAudioContext)();
+    if(playCtx.state === 'suspended') playCtx.resume();
+    return playCtx;
+  }
+
   function playPcm(buf){
-    if(!playCtx) playCtx=new (window.AudioContext||window.webkitAudioContext)();
+    ensurePlayback();
+    if(playCtx.state === 'suspended'){
+      console.warn('[audio] AudioContext 被浏览器挂起，点一下页面再试');
+    }
     // PCM16 一个样本 2 字节；奇数长度的 buffer 直接 new Int16Array 会抛 RangeError，
     // 外面那个 catch 一吞就是整块音频没了。服务端已按样本边界切好，这里再兜一道。
     if(buf.byteLength & 1) buf = buf.slice(0, buf.byteLength - 1);
@@ -1381,7 +1393,7 @@ window.brainAdd = function(side, kind, label, slot){
           .catch(function(){});
         break;
       case 'memory_hits': onMemoryHits(msg); break;
-      case 'answer_start': setVoiceState('ai'); replyText=''; $('reply').textContent=''; if(playCtx&&playCtx.state==='suspended')playCtx.resume(); break;
+      case 'answer_start': setVoiceState('ai'); replyText=''; $('reply').textContent=''; ensurePlayback(); break;
       case 'answer_delta': replyText+=msg.text; $('reply').textContent=replyText; break;
       case 'answer_done':
         addTurn('ai', replyText);
@@ -1563,6 +1575,7 @@ window.brainAdd = function(side, kind, label, slot){
     if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
       $('voiceLab').textContent = '请用 http://localhost:8000 打开（不能直接双击 html）'; return;
     }
+    ensurePlayback();          // 必须在这个点击里建 AudioContext，见函数注释
     try{ await startMic(); }catch(e){ $('voiceLab').textContent='麦克风被拒绝/不可用'; console.warn(e); return; }
     try{ await openWS(); }catch(e){ stopMic(); return; }
     recording=true; talkBtn.textContent='结束对话'; talkBtn.classList.add('live'); setVoiceState('user');
