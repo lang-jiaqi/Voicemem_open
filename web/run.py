@@ -200,10 +200,28 @@ async def start_realtime_turn(pending, conn, send):
 
 
 async def _no_realtime(sock, err):
-    """没有 Realtime 权限时别让人对着 traceback 猜——直接说清楚换哪条路。"""
-    msg = (f"连不上 OpenAI Realtime（{type(err).__name__}: {err}）。"
-           "这个 key 可能没有 Realtime 权限——改用 `python web/run.py --mode llm_tts`，"
-           "那条路只要普通 chat + TTS。")
+    """连不上 Realtime 时别让人对着 traceback 猜。
+
+    要分清是**网络**还是**权限**：DNS/连接失败跟 key 没有关系，之前一律说成
+    「key 可能没权限」，把人往错的方向指了。
+    """
+    name, text = type(err).__name__, str(err)
+    network = (isinstance(err, (OSError, TimeoutError, ConnectionError))
+               or "gaierror" in name.lower()
+               or any(k in text.lower() for k in ("nodename", "temporary failure",
+                                                  "name or service", "getaddrinfo",
+                                                  "connection refused", "timed out")))
+    if network:
+        why = ("网络连不上 api.openai.com（DNS/代理/VPN 的问题，跟 key 无关）。"
+               "确认能上网后重开；离线环境用 `--mode llm_tts` 也一样连不上，"
+               "两条路都要访问 OpenAI。")
+    elif any(k in text for k in ("401", "403", "invalid_api_key", "insufficient", "model_not_found")):
+        why = ("这个 key 没有 Realtime 权限或模型不可用——改用 "
+               "`python web/run.py --mode llm_tts`，那条路只要普通 chat + TTS。")
+    else:
+        why = ("先看这条报错本身；如果只是 Realtime 用不了，可以改用 "
+               "`python web/run.py --mode llm_tts`（普通 chat + TTS）。")
+    msg = f"连不上 OpenAI Realtime（{name}: {text}）。{why}"
     print(f"[web] {msg}", flush=True)
     try:
         await sock.send_json({"type": "error", "message": msg})

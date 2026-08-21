@@ -109,6 +109,8 @@ def build_app(mode, session, classify, snapshot=None):
 
     @app.get("/")
     def index():
-        return FileResponse(HERE / "index.html")
+        # no-store：demo_local 也占 8787，同源缓存会让浏览器端出上一个 demo 的旧页面
+        return FileResponse(HERE / "index.html",
+                            headers={"Cache-Control": "no-store"})
 
     return app
