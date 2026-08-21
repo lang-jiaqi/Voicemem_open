@@ -49,17 +49,10 @@ def _reply_seg(reply, name):
     return seg.get("provider"), (seg.get("config") or {})
 
 
-# ── LLM / TTS / Realtime 流 ───────────────────────────────────────────────────
-async def llm_stream(text, ctx, reply=None):
-    _, cfg = _reply_seg(reply, "llm")
-    stream = await client.chat.completions.create(
-        model=cfg.get("model") or CHAT_MODEL, stream=True,
-        messages=[{"role": "system", "content": ctx or "你是语音助手，简短自然地回答。"},
-                  {"role": "user", "content": text}])
-    async for chunk in stream:
-        d = chunk.choices[0].delta.content
-        if d:
-            yield d
+# ── Realtime 流 ───────────────────────────────────────────────────────────────
+# 原来这里还有一份 llm_stream()——和核心回复层（voicemem/reply.py 的 openai_reply）
+# 是同一件事：流式调 chat.completions，把记忆拼进 system。run.py 现在直接用
+# vm.reply_stream()，人设走 CONFIG.reply.llm.config.system，这份已删。
 
 
 def realtime_connect(reply=None):
