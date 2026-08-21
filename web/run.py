@@ -28,6 +28,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import sys
 import uuid
 from dataclasses import dataclass
@@ -464,27 +465,38 @@ async def realtime_session(sock):
         await _no_realtime(sock, e)
 
 
-#: 右脑内容 → 脑图三个簇。
+#: 右脑 slot → 脑图三个簇。
 #:
-#: 为什么看内容前缀而不是 source：source 只有 heartnote / response_experience /
-#: profile 三种，而 profile 是个容器——"情绪：…""喜好与厌恶：…""应对方式：…"
-#: 全挂在它下面。只看 source 的话这些一律归到 preference，于是说"我很伤心"，
-#: 射线也全打在 preference 上，emotion 那一簇永远是空的。
-_CLUSTER_PREFIX = (
-    ("emotion",     ("情绪", "情感记录", "内心OS", "感受")),
-    ("preference",  ("喜好与厌恶", "偏好", "思维模式", "饮食")),
-    ("experiences", ("应对方式", "表达风格", "避免重复", "印象", "沟通")),
-)
+#: 右脑真正的分类单位是 rb_slots 里那 6 个 slot（情绪 / 喜好与厌恶 / 应对方式 /
+#: 表达风格 / 思维模式 / 人物地点态度），不是 memory_class——那只有 heartnote /
+#: response_experience 两种，分不出东西。脑图上只有三个簇，所以这里把 6 个 slot
+#: 收敛成 3 个。
+#:
+#: 检索命中的内容里，slot 名就写在开头（"情绪：…""喜好与厌恶：…"）；
+#: heartnote 是一条条的情绪时刻（"情感记录：…（内心OS：【难过】…）"），归 emotion。
+SLOT_TO_CLUSTER = {
+    "情绪":         "emotion",
+    "情感记录":     "emotion",
+    "内心OS":       "emotion",
+    "喜好与厌恶":   "preference",
+    "思维模式":     "preference",
+    "应对方式":     "experiences",
+    "表达风格":     "experiences",
+    "人物地点态度": "experiences",
+    "避免重复":     "experiences",
+}
 _CALM = ("", "平静", "中性")
 
 
 def rb_cluster(content: str, memory_class: str = "", emotion: str = "") -> str:
-    """一条右脑记忆归到脑图哪个簇。0 LLM，只看已有字段。"""
-    text = content or ""
-    for cluster, words in _CLUSTER_PREFIX:
-        for w in words:
-            if w in text[:14]:                 # 前缀里出现才算，正文里提到不算
-                return cluster
+    """一条右脑记忆归到脑图哪个簇。0 LLM，只看 slot 名。"""
+    # 先剥掉 "[2026-06-20] " 这种日期前缀，否则它占满取来比对的那一小段，
+    # heartnote 的"情感记录"就落到窗口外了。
+    text = re.sub(r"^\s*\[[0-9-]{6,12}\]\s*", "", content or "")
+    head = text[:14]
+    for slot, cluster in SLOT_TO_CLUSTER.items():
+        if slot in head:
+            return cluster
     if str(memory_class) == "response_experience":
         return "experiences"
     if emotion not in _CALM:
