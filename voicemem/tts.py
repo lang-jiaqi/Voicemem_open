@@ -68,7 +68,8 @@ async def tts_stream(text, reply=None):
     """
     provider, cfg = _tts_cfg(reply)
     backend_name = provider or TTS_BACKEND          # 对齐现有 TTS_BACKEND 语义
-    backend = _local_tts_stream if backend_name == "local" else _openai_tts_stream
+    backend = {"local": _local_tts_stream, "voxcpm": _voxcpm_tts_stream}.get(
+        backend_name, _openai_tts_stream)
     tail = b""
     async for chunk in backend(text, cfg.get("model")):
         buf = tail + chunk
@@ -105,6 +106,24 @@ async def _local_tts_stream(text, model=None):
     for raw in v.synthesize_stream_raw(text):          # 同步生成器，int16 bytes @ sr
         f = np.frombuffer(raw, np.int16).astype(np.float32) / 32768.0
         out = resample(f, src=sr, dst=SAMPLE_RATE)     # 统一到 24k
+        yield (np.clip(out, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+
+
+@lru_cache(maxsize=1)
+def _voxcpm_model():
+    """离线大模型：VoxCPM2（2B，48k 输出，中英+多语）。装：pip install voxcpm。
+    VOICEMEM_TTS_MODEL 可指向本地目录，缺省用 HF 上的 openbmb/VoxCPM2（走本地缓存）。"""
+    from voxcpm import VoxCPM
+    return VoxCPM.from_pretrained(
+        os.environ.get("VOICEMEM_TTS_MODEL") or "openbmb/VoxCPM2", load_denoiser=False)
+
+
+async def _voxcpm_tts_stream(text, model=None):
+    """和 _local_tts_stream 同形：合成 → 重采样到 24k → 分块 yield。"""
+    m = _voxcpm_model()
+    sr = m.tts_model.sample_rate
+    for f in m.generate_streaming(text=text):
+        out = resample(np.asarray(f, np.float32).reshape(-1), src=sr, dst=SAMPLE_RATE)
         yield (np.clip(out, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
 
 
