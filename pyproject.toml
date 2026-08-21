@@ -10,6 +10,14 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Lang Jiaqi" }]
+keywords = ["memory", "voice", "agent", "llm", "speech", "rag"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
 
 # Keep the default installation lightweight. No local speech, audio, or
 # multimodal model runtime is installed by `pip install voicemem`.
@@ -99,5 +107,15 @@ demo = [
     "voicemem[web]",
 ]
 
+[project.urls]
+Homepage = "https://github.com/lang-jiaqi/Voicemem_open"
+Repository = "https://github.com/lang-jiaqi/Voicemem_open"
+Issues = "https://github.com/lang-jiaqi/Voicemem_open/issues"
+
 [tool.setuptools.packages.find]
 include = ["voicemem*"]
+
+# data/ 下的 prompt 文本是运行时读的（见 leftbrain/mem0_additive_prompt_build.py），
+# 不显式声明的话 wheel 里不会有，装完一调用就 FileNotFoundError。
+[tool.setuptools.package-data]
+"*" = ["data/*.txt", "*.txt"]
