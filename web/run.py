@@ -171,7 +171,11 @@ async def voicemem_llm_tts(pending, send, send_audio):
     speaker = asyncio.create_task(speak())
     reply, buf, sent = "", "", 0
     try:
-        async for d in utils.llm_stream(pending.text, pending.memory_context, REPLY):
+        # 跟 realtime 用同一份指令：两条路必须表现一致，否则换个 --mode
+        # 人设和「右脑不许念出来」的约束就悄悄没了。
+        async for d in utils.llm_stream(pending.text,
+                                        _realtime_instructions(pending.memory_context),
+                                        REPLY):
             reply += d
             buf += d
             await send({"type": "answer_delta", "text": d})
@@ -192,7 +196,16 @@ async def voicemem_llm_tts(pending, send, send_audio):
     await speaker
 
 
-_RT_PERSONA = "你是用户的语音助手，简短自然地回答。"
+_RT_PERSONA = (
+    "你是这个用户认识很久的朋友，不是助手。简短、自然、像人说话。\n"
+    "记忆分两种，用法完全不同：\n"
+    "· MEMORY CONTEXT 里的事实——可以直接提，就像你本来就记得（"
+    "「Annie 那事你还好吗」，不是「根据记录，Annie 要转学」）。\n"
+    "· HOW TO SPEAK 里的内容——只影响你的语气、先说什么、什么别碰。"
+    "一个字都不要说出来。听出他心情不好就先接住情绪再说事；"
+    "知道他不好意思开口，就别追问；知道他讨厌什么，就绕开。\n"
+    "别复述他刚说的话，别用「我记得你说过」开头，别念清单。"
+)
 
 
 def _realtime_instructions(memory_context: str) -> str:
@@ -200,8 +213,7 @@ def _realtime_instructions(memory_context: str) -> str:
     背景资料念出来，而不是当成自己对这个用户的记忆自然地用。"""
     if not memory_context:
         return _RT_PERSONA
-    return (f"{_RT_PERSONA}\n\n以下是你记得的关于这个用户的事，回答时自然地用上，"
-            f"别说「根据记录」这类话：\n{memory_context}")
+    return f"{_RT_PERSONA}\n\n{memory_context}"
 
 
 async def start_realtime_turn(pending, conn, send):

@@ -61,8 +61,15 @@ def build_memory_context(result: Any, max_rb: int = 3) -> str:
             lines.append(f"- [{when}] {hit.text}" if when else f"- {hit.text}")
     rb_hits = getattr(result, "rb_hits", None) or []
     if rb_hits:
+        # 右脑内容必须跟事实分开标注。它是画像/情绪归因/回复经验——写给模型看的
+        # 内部笔记（"⚠ 避免重复：…（下次：…）""应对方式：…"），不是能对用户讲的话。
+        # 不标注就只是跟在事实后面的几行文本，模型会照着念，回复立刻变成
+        # "你的应对方式是通过健身缓解压力"这种听起来像读档案的句子。
         lines.append("")
-        lines.extend(h.content for h in rb_hits[:max_rb])
+        lines.append("HOW TO SPEAK TO THIS USER (internal — never quote or paraphrase aloud):")
+        lines.extend(f"- {h.content}" for h in rb_hits[:max_rb])
+        lines.append("Let these shape your tone, what you bring up, and what you leave alone. "
+                     "Never state them back to the user.")
     return "\n".join(lines)
 
 
