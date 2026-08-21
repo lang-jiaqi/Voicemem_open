@@ -44,7 +44,8 @@
   #brain{
     position:absolute;inset:0;width:100%;height:100%;
     object-fit:contain;mix-blend-mode:screen;
-    filter:brightness(.92) contrast(1.06);
+    /* contrast 拉高让外圈那层软光衰减更快（光晕变窄），brightness 压低让它不抢戏 */
+    filter:brightness(.72) contrast(1.5);
     opacity:0;transition:opacity 1.4s ease .1s;
     pointer-events:none;user-select:none;
   }
@@ -486,7 +487,8 @@ const N = G.nodes.map((n,i)=>({
   dl: 0.35 + n.x*1.05 + (n.k==='hub'?-0.3:0)
 }));
 const L = G.links;
-const CROSS = L.filter(l=>l.t==='cross').map(l=>({l}));
+// 这一次检索的跨脑光束：[{l:{a,b}}]，走完就清空。搜索时由 brainBeam() 填。
+const BEAM = [];
 const USER = N.findIndex(n=>n.k==='user');
 const PULSE = { t:-0.6, dur:2.3, gap:1.9, trail:0.30, seg:30 };
 const ADJ = N.map(()=>[]);
@@ -657,14 +659,16 @@ function frame(now){
   }
 
   /* one synchronised pulse of light runs every callosum strand */
-  if(!REDUCED){
+  // 检索完才放这道光：从左脑命中的事实射向右脑命中的画像，
+  // 走完一遍就停（BEAM 清空），不再无限循环——它表示"这一次检索发生了跨脑联合"。
+  if(!REDUCED && BEAM.length){
     PULSE.t += dt/PULSE.dur;
-    if(PULSE.t > 1 + PULSE.trail) PULSE.t = -PULSE.gap/PULSE.dur;
+    if(PULSE.t > 1 + PULSE.trail){ BEAM.length = 0; PULSE.t = -0.02; }
     if(PULSE.t > -PULSE.trail){
       ctx.globalCompositeOperation='lighter';
       ctx.lineCap='round'; ctx.lineJoin='round';
       const STEP = PULSE.trail/PULSE.seg;
-      for(const p of CROSS){
+      for(const p of BEAM){
         const a=N[p.l.a], b=N[p.l.b], c=ctl(a,b);
         const f = Math.min(a.f,b.f)*Math.min(a.iv,b.iv);
         if(f < .05) continue;
@@ -734,7 +738,7 @@ function frame(now){
   const FS = Math.max(8.4, 11.4*S);
   ctx.font = FS.toFixed(1)+'px '+MONOF;
   ctx.textAlign='center'; ctx.textBaseline='middle';
-  if('letterSpacing' in ctx) ctx.letterSpacing = (FS*.11).toFixed(2)+'px';
+  if('letterSpacing' in ctx) ctx.letterSpacing = (FS*.06).toFixed(2)+'px';
   for(const n of N){
     if(n.k!=='label' && n.k!=='user') continue;
     const tw = ctx.measureText(n.w).width;
@@ -743,13 +747,13 @@ function frame(now){
     if(n.k==='label'){ n.bw = bw; n.bh = bh; }
     const a = n.iv * (n.k==='user' ? 1 : 1) * (0.62 + n.h*.38);
     ctx.beginPath(); rrect(n.x-bw/2, cy-bh/2, bw, bh, 1.5);
-    ctx.fillStyle = 'rgba(2,3,6,'+(0.78*n.iv).toFixed(3)+')'; ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,'+(0.9*n.iv).toFixed(3)+')'; ctx.fill();
     ctx.strokeStyle = 'rgba(255,255,255,'+(a*.13).toFixed(3)+')';
     ctx.lineWidth = Math.max(2.2, 3.4*Math.max(.85,S)); ctx.stroke();
     ctx.strokeStyle = 'rgba(255,255,255,'+(a*(n.k==='user'?.8:1)).toFixed(3)+')';
     ctx.lineWidth = Math.max(.7, 1.05*Math.max(.85,S));
     ctx.stroke();
-    ctx.fillStyle = 'rgba(255,255,255,'+(n.iv*(0.82+n.h*.18)).toFixed(3)+')';
+    ctx.fillStyle = 'rgba(255,255,255,'+(n.iv*(0.97+n.h*.03)).toFixed(3)+')';
     ctx.fillText(n.w, n.x + FS*.055, cy + FS*.06);
   }
   if('letterSpacing' in ctx) ctx.letterSpacing = '0px';
@@ -952,10 +956,32 @@ window.brainClear = function(){ for(const n of N) n.act = 0; };
 // 脑图藏起来时容器尺寸是 0；从 Chat 切回 Memory Space 后要重算一次。
 window.brainResize = resize;
 
+// 两条记忆讲同一个人/同一件事 → 连一条线。由前端在铺记忆时按实体交集调用。
+window.brainLink = function(idA, idB){
+  if(idA === idB) return;
+  for(const i of ADJ[idA]) if(L[i].a === idB || L[i].b === idB) return;   // 已连过
+  const i = L.length;
+  L.push({a: idA, b: idB, t: 'rel', w: 0.28});
+  ADJ[idA].push(i); ADJ[idB].push(i);
+  NB[idA].push(idB); NB[idB].push(idA);
+};
+
+// 检索时放一道光：从左脑命中射向右脑命中。
+window.brainBeam = function(fromIds, toIds){
+  BEAM.length = 0;
+  for(const a of fromIds){
+    for(const b of toIds){
+      if(N[a] && N[b]) BEAM.push({l: {a: a, b: b}});
+    }
+  }
+  if(BEAM.length) PULSE.t = -PULSE.trail;      // 从头开始走
+};
+
+
 /* ---- 运行时生长：实时对话时往脑图新增节点 + 连线（映射关系）----
    window.brainAdd(side, kind, label) 在对应半球加一个节点并连到 user 节点，
    返回 id；带淡入 + 短暂高亮。R_BY_KIND 控制不同类型的点大小。 */
-const CLUSTER_R = 0.062, CLUSTER_N = 24;   // 每簇撒点的圆盘半径 / 参考点数
+const CLUSTER_R = 0.092, CLUSTER_N = 20;   // 每簇撒点的圆盘半径 / 参考点数
 const _clusterCount = {};      // 每个簇已经撒了几个点，决定下一个点在螺旋上的位置
 const R_BY_KIND = { entity:2.6, know:2.6, person:2.6, emotion:5.4, exper:5.0, prefer:5.2 };
 function _nowT(){ return (performance.now()-t0)/1000; }
@@ -992,7 +1018,7 @@ window.brainAdd = function(side, kind, label, slot){
     const t = li0!=null ? 'in' : 'cross';
     const i = L.length; L.push({a:tgt, b:n.id, t, w:t==='cross'?0.6:0.4});
     ADJ[tgt].push(i); ADJ[n.id].push(i); NB[tgt].push(n.id); NB[n.id].push(tgt);
-    if(t==='cross') CROSS.push({l:L[i]});
+
   }
   resize();
   return n.id;
@@ -1146,6 +1172,54 @@ window.brainAdd = function(side, kind, label, slot){
     renderTags();
   }
 
+
+  /* ---- 按实体关系连线 ----
+     两条记忆挂了同一个实体（同一个人、同一门课、同一个地方）就连一条线。
+     账号主人那个实体要跳过——它几乎挂在每条记忆上，连出来是一团毛线，
+     什么信息都没有。判据：出现在超过一半记忆里的实体不算关系。 */
+
+  function linkByEntity(items) {
+    var nodeIds = [];
+    var i, j;
+    for (i = 0; i < items.length; i++) {
+      nodeIds.push(growLeft(items[i].text, items[i].slot));
+    }
+
+    // 先统计每个实体挂了几条记忆
+    var count = {};
+    for (i = 0; i < items.length; i++) {
+      var ents = items[i].entities || [];
+      for (j = 0; j < ents.length; j++) {
+        count[ents[j]] = (count[ents[j]] || 0) + 1;
+      }
+    }
+
+    var tooCommon = items.length * 0.5;
+    var byEntity = {};
+    for (i = 0; i < items.length; i++) {
+      if (nodeIds[i] === undefined) continue;      // 这条没长出节点（去重或超上限）
+      var list = items[i].entities || [];
+      for (j = 0; j < list.length; j++) {
+        var ent = list[j];
+        if (count[ent] < 2 || count[ent] > tooCommon) continue;
+        if (!byEntity[ent]) byEntity[ent] = [];
+        byEntity[ent].push(nodeIds[i]);
+      }
+    }
+
+    var linked = 0;
+    for (var ent2 in byEntity) {
+      var group = byEntity[ent2];
+      for (i = 0; i < group.length; i++) {
+        for (j = i + 1; j < group.length; j++) {
+          window.brainLink(group[i], group[j]);
+          linked = linked + 1;
+        }
+      }
+    }
+    console.log('[graph] 按实体连了', linked, '条关系线');
+  }
+
   function railAdd(slot, text){                // 左侧栏板对应槽的列表里也实时追加
     const ul = document.getElementById('mem-'+slot); if(!ul) return;
     const li = document.createElement('li'); li.textContent = text.slice(0,42); li.className='new';
@@ -1154,22 +1228,29 @@ window.brainAdd = function(side, kind, label, slot){
     if(cnt) cnt.textContent = ul.querySelectorAll('li:not(.you)').length;
   }
   function growLeft(text, slot){
-    const key = 'L|'+text; if(seen.has(key) || addedCount>=MAX_NODES) return;
-    seen.set(key, window.brainAdd('L','entity', text, slot)); addedCount++;
+    const key = 'L|'+text;
+    if(seen.has(key)) return seen.get(key);          // 已经长过：返回原节点，好连线
+    if(addedCount>=MAX_NODES) return undefined;
+    const id = window.brainAdd('L','entity', text, slot);
+    seen.set(key, id); addedCount++;
     railAdd(slot, text);
+    return id;
   }
   function growRight(kind, text){
-    growRightIn(RIGHT_CLUSTER[kind] || 'experiences', text, kind);
+    return growRightIn(RIGHT_CLUSTER[kind] || 'experiences', text, kind);
   }
   // 按簇名直接放。后端已经把右脑记忆归好簇了（见 run.py 的 _rb_cluster），
   // 前端不用再从 memory_class 猜——右脑只有 heartnote / response_experience
   // 两个 class，猜不出 emotion / preference 的区别。
   const KIND_OF_CLUSTER = { emotion:'emotion', preference:'prefer', experiences:'exper' };
   function growRightIn(cluster, text, kind){
-    const key = 'R|'+text; if(seen.has(key) || addedCount>=MAX_NODES) return;
-    seen.set(key, window.brainAdd('R', kind || KIND_OF_CLUSTER[cluster] || 'exper', text, cluster));
-    addedCount++;
+    const key = 'R|'+text;
+    if(seen.has(key)) return seen.get(key);
+    if(addedCount>=MAX_NODES) return undefined;
+    const id = window.brainAdd('R', kind || KIND_OF_CLUSTER[cluster] || 'exper', text, cluster);
+    seen.set(key, id); addedCount++;
     railAdd(cluster, text);
+    return id;
   }
   function onMemoryHits(m){
     console.log('[voice] memory_hits  left=', (m.left_brain||[]).length,
@@ -1187,8 +1268,22 @@ window.brainAdd = function(side, kind, label, slot){
     renderTags();
     // 脑图生长：左脑事实 → 按 SlotV2 槽归到对应簇；右脑命中 → 右半球对应类型节点
     const slots = curSlots.length ? curSlots : ['daily_life'];
-    (m.left_brain||[]).slice(0,4).forEach((h,i)=> growLeft(h.text, slots[i % slots.length]));
-    for(const h of (m.right_brain_hits||[]).slice(0,4)) growRight(SRC_KIND[h.source]||'exper', h.content);
+    var leftIds = [];
+    var rightIds = [];
+    var hitsL = (m.left_brain || []).slice(0, 4);
+    var hitsR = (m.right_brain_hits || []).slice(0, 4);
+    for (var i = 0; i < hitsL.length; i++) {
+      var id = growLeft(hitsL[i].text, slots[i % slots.length]);
+      if (id !== undefined) leftIds.push(id);
+    }
+    for (var j = 0; j < hitsR.length; j++) {
+      var rid = growRight(SRC_KIND[hitsR[j].source] || 'exper', hitsR[j].content);
+      if (rid !== undefined) rightIds.push(rid);
+    }
+    // 这一次检索的跨脑联合：一道光从左脑命中的事实射向右脑命中的画像
+    if (leftIds.length > 0 && rightIds.length > 0 && window.brainBeam) {
+      window.brainBeam(leftIds, rightIds);
+    }
   }
 
   // ---- playback（复用 orb.html 机制）----
@@ -1656,7 +1751,7 @@ window.brainAdd = function(side, kind, label, slot){
       const r = await fetch('/api/memories');
       if(!r.ok) return;
       const m = await r.json();
-      for(const e of (m.left||[]))  growLeft(e.text, e.slot);
+      linkByEntity(m.left || []);
       for(const e of (m.right||[])) growRightIn(e.cluster||'experiences', e.text);
       console.log('[seed] 已有记忆 left=',(m.left||[]).length,'right=',(m.right||[]).length);
     }catch(e){ console.warn('[seed] 读取已有记忆失败', e); }

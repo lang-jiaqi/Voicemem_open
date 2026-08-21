@@ -516,8 +516,15 @@ def memory_snapshot(limit: int = 48) -> dict:
             # list_entries 的 date 直接截了 time_start 前 10 位，遇到纯时间串会切出
             # "09:20:37" 这种。不像日期就置空，别把垃圾送到前端。
             d = str(e.get("date", ""))
+            # 带上这条记忆挂了哪些实体：前端据此在讲同一个人/同一件事的两条记忆
+            # 之间连线——脑图上的连线才对应真实关系，而不是随便连。
+            try:
+                ents = cog.entity_ids_for_memory(e["id"])
+            except Exception:
+                ents = []
             left.append({"text": e["text"], "date": d if d[:4].isdigit() else "",
-                         "slot": slot_of.get(e["id"], "daily_life")})
+                         "slot": slot_of.get(e["id"], "daily_life"),
+                         "entities": list(ents)[:6]})
     except Exception as e:
         print(f"[web] 左脑快照读取失败：{e}", flush=True)
     try:
