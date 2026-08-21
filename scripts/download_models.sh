@@ -15,14 +15,16 @@
 # 代码会回退到 HF id，首次用到时 transformers 自动拉。
 #
 # 不在这里的两样：
-#   · 回复模型 —— adapter 在 LangJiaqi77/Voicemem-Qwen3_6-35B-A3B-QLoRA-v2，基座另取
-#   · 微调的 Omni 情绪模型 —— zhifeixie/VoiceMem_SLM_Qwen25_omni，
-#     用 VOICEMEM_OMNI_MODEL 指过去（见下面 --slm）
+#   · 回复模型 —— PEFT adapter（180MB），挂在 Qwen/Qwen3.6-35B-A3B 上，基座另取。
+#     加 --reply-adapter 拉，见下面。
+#   · 情绪归因用的 Qwen2.5-Omni —— 目前没有发布微调版，代码默认用官方
+#     Qwen/Qwen2.5-Omni-3B，首次用到时自动拉。有自己的微调版就
+#     export VOICEMEM_OMNI_MODEL=/你的/路径 指过去。
 #
 # 用法（从仓库根目录）:
 #   bash scripts/download_models.sh                  # 拉 models/ 那一套
 #   bash scripts/download_models.sh /path/to/models  # 换目标目录
-#   bash scripts/download_models.sh --slm            # 额外拉微调的 Omni 模型
+#   bash scripts/download_models.sh --reply-adapter  # 额外拉回复模型 adapter
 #   VOICEMEM_FROM_UPSTREAM=1 bash scripts/download_models.sh   # 改从各家官方源逐个拉
 set -euo pipefail
 
@@ -30,13 +32,14 @@ DEST="models"
 WANT_SLM=0
 for arg in "$@"; do
   case "$arg" in
-    --slm) WANT_SLM=1 ;;
+    --reply-adapter|--slm) WANT_SLM=1 ;;   # --slm 是旧名字，留着不破坏老命令
     *)     DEST="$arg" ;;
   esac
 done
 
 REPO="${VOICEMEM_MODELS_REPO:-zhifeixie/VoiceMem_Default_Models_Env}"
-SLM_REPO="${VOICEMEM_SLM_REPO:-zhifeixie/VoiceMem_SLM_Qwen25_omni}"
+# 注意：仓库名里写着 Qwen25_omni，但内容是 Qwen3.6-35B 的回复 adapter。
+ADAPTER_REPO="${VOICEMEM_REPLY_ADAPTER_REPO:-${VOICEMEM_SLM_REPO:-zhifeixie/VoiceMem_SLM_Qwen25_omni}}"
 mkdir -p "${DEST}"
 
 if [ "${VOICEMEM_FROM_UPSTREAM:-0}" != "1" ]; then
@@ -85,15 +88,17 @@ PY
 fi
 
 if [ "${WANT_SLM}" = "1" ]; then
-  echo "[2/2] 微调的 Omni 情绪模型 ${SLM_REPO} …"
-  python3 - "${SLM_REPO}" "${DEST}" <<'PY'
+  echo "[2/2] 回复模型 adapter ${ADAPTER_REPO} …"
+  python3 - "${ADAPTER_REPO}" "${DEST}" <<'PY'
 import sys
 from huggingface_hub import snapshot_download
-snapshot_download(repo_id=sys.argv[1], local_dir=f"{sys.argv[2]}/slm")
+snapshot_download(repo_id=sys.argv[1], local_dir=f"{sys.argv[2]}/reply_adapter")
 PY
-  echo "      用它：export VOICEMEM_OMNI_MODEL=${DEST}/slm"
+  echo "      用它：export VOICEMEM_REPLY_ADAPTER=${DEST}/reply_adapter"
+  echo "      这是 adapter 不是完整模型——基座 Qwen/Qwen3.6-35B-A3B 要另取，按它自己的 license。"
+  echo "      跑：python examples/04_voice_agent_own_model.py"
 else
-  echo "[2/2] 跳过微调的 Omni 模型（要的话加 --slm）"
+  echo "[2/2] 跳过回复模型 adapter（要的话加 --reply-adapter）"
 fi
 
 echo

@@ -35,6 +35,7 @@ models/scene/
 models/emotion/
 models/tts/
 models/slm/
+models/reply_adapter/
 
 # 本地演示分叉与个人种子脚本
 demo_local/

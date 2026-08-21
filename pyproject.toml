@@ -40,6 +40,12 @@ audio = [
     "soundfile",
 ]
 
+# finetune/ 那套训练脚本。torch 按自己的平台/CUDA 版本单独装。
+finetune = [
+    "ms-swift==4.5.2",
+    "bitsandbytes",
+]
+
 environment = [
     "torch",
     "transformers",
