@@ -68,7 +68,7 @@ pip install "voicemem[slm]"
 
 ```bash
 pip install -U huggingface_hub
-hf download zhifeixie/VoiceMem_default --local-dir ./models
+hf download zhifeixie/VoiceMem_Default_Models_Env --local-dir ./models
 ```
 
 
