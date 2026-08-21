@@ -339,9 +339,28 @@ class Orchestrator:
             if "registry" not in self._cache:
                 from voicemem.utils.common.voice_input import VoiceprintRegistry
                 self._cache["registry"] = VoiceprintRegistry(
-                    self._memory_root / "voiceprint_registry.json"
+                    self._memory_root / "voiceprint_registry.json",
+                    entity_resolver=self._person_entity_id,
                 )
         return self._cache["registry"]
+
+    def _person_entity_id(self, name: str) -> str:
+        """人名 -> 认知图里 person 实体的 id；查不到返回 ""（只读，不建实体）。
+
+        声纹认出「这是谁」和认知图记住「关于这个人的事」本是两套 id，这里把它们接上：
+        接上之后 speaker_entity_map 才非空，search(speaker_filter=…) 才有边可走。
+        """
+        try:
+            from voicemem.leftbrain.cognitive_graph.store import normalize_name
+            store = self._get_repo()._cognitive_store
+            for e in store.find_entities(self._user_id, name_norm=normalize_name(name)):
+                # 注意取 .value：EntityType 虽是 str 枚举，3.11+ 的 str() 给的是
+                # "EntityType.PERSON" 而不是 "person"。
+                if getattr(e.entity_type, "value", e.entity_type) in ("person", "user"):
+                    return e.id
+        except Exception:
+            pass
+        return ""
 
     # ── audiomem：场景 + 声纹相关懒加载单例 ─────────────────────────────────────
 

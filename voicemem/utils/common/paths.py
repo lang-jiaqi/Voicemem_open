@@ -23,7 +23,7 @@ def model_path(name: str, env_override: str | None = None, kind: str = "") -> Pa
     """取一个具体模型文件的路径；``env_override`` 指定的环境变量优先级最高。
 
     ``kind`` 是按用途分的子目录（``vad`` / ``asr`` / ``speaker``），跟发布仓库
-    zhifeixie/VoiceMem_default 的布局一致。找不到就退回上一版的平铺布局——早先
+    zhifeixie/VoiceMem_Default_Models_Env 的布局一致。找不到就退回上一版的平铺布局——早先
     下载过的人不该因为换了组织方式就突然找不到模型。
     """
     if env_override:
@@ -41,7 +41,7 @@ def model_path(name: str, env_override: str | None = None, kind: str = "") -> Pa
 def hf_model(kind: str, default_id: str, env_override: str | None = None) -> str:
     """一个 HF 模型该从哪儿加载：``env`` > 本地离线包 > HF 仓库 id（自动下载）。
 
-    离线包就是 ``<models>/<kind>/``，布局跟发布仓库 zhifeixie/VoiceMem_default 一致
+    离线包就是 ``<models>/<kind>/``，布局跟发布仓库 zhifeixie/VoiceMem_Default_Models_Env 一致
     （``embedding`` / ``scene`` / ``emotion`` …，一个用途一个文件夹）。没下载过就返回
     HF id，transformers 照旧首次运行时自动拉——**零配置的默认行为不变**，下载了
     离线包的人则整条链路不再需要网络。

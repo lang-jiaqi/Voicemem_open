@@ -16,7 +16,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."          # 允许从任何目录调用，路径一律按仓库根算
 
-REPO="${VOICEMEM_MODELS_REPO:-zhifeixie/VoiceMem_default}"
+REPO="${VOICEMEM_MODELS_REPO:-zhifeixie/VoiceMem_Default_Models_Env}"
 DEST_ROOT="${VOICEMEM_MODELS_ROOT:-models}"
 
 # 不传的两样：voicemem-qwen3.6-*（发布清单，跟着代码仓库走）、slm（另有仓库）

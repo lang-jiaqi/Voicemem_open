@@ -35,7 +35,7 @@ for arg in "$@"; do
   esac
 done
 
-REPO="${VOICEMEM_MODELS_REPO:-zhifeixie/VoiceMem_default}"
+REPO="${VOICEMEM_MODELS_REPO:-zhifeixie/VoiceMem_Default_Models_Env}"
 SLM_REPO="${VOICEMEM_SLM_REPO:-zhifeixie/VoiceMem_SLM_Qwen25_omni}"
 mkdir -p "${DEST}"
 
