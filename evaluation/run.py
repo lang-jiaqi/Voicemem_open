@@ -2,17 +2,6 @@
 """VoiceMem 评测入口：一条命令跑完一个 benchmark。
 
     python evaluation/run.py --dataset locomo --data data/locomo.json
-
-流程就下面五步，所有数据集都走这一条（不同的只有"怎么读"和"怎么判分"，
-在 evaluation/datasets/ 里）：
-
-    ① 读数据集         → list[Conversation]
-    ② 逐轮 ingest      → 每段对话一个独立记忆库
-    ③ 每题 search      → 拿到这题该用的记忆
-    ④ 让答案模型作答   → 只给它检索到的记忆，不给原始对话
-    ⑤ 判分             → 数据集自己的口径
-
-④ 只给记忆不给原文，是这个评测的关键：给了原文就成了阅读理解，测不出记忆系统。
 """
 from __future__ import annotations
 
