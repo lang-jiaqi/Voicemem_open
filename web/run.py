@@ -82,8 +82,9 @@ BARGE_MIN_MS = int(os.environ.get("BARGE_MIN_MS", "280"))
 #: 助手刚开口那一小段不允许被打断——那时候麦克风里几乎只有它自己的声音。
 BARGE_GRACE_MS = int(os.environ.get("BARGE_GRACE_MS", "500"))
 MIC_RATE = 24000                       # 前端上行的采样率（index.html 的 SAMPLE_RATE）
-#: 按声纹拦陌生人。默认关——声纹那套模型一次 ~2 秒，多人场景才值得付这个钱。
-SPEAKER_GATE = os.environ.get("VOICEMEM_SPEAKER_GATE", "0") != "0"   # 打断为什么没触发：看这几行日志
+#: 按声纹拦陌生人。默认开——启动时预热过、又在后台线程算，实测对延迟零影响
+#: （memory_hits 仍在 EOU 前 0.63s 到达，跟关掉时一样）。
+SPEAKER_GATE = os.environ.get("VOICEMEM_SPEAKER_GATE", "1") != "0"   # 打断为什么没触发：看这几行日志
 MODE = ARGS.mode                                     # llm_tts | realtime
 SPEC_MIN_CHARS = ARGS.spec_min_chars                 # partial 起投机
 GAMBLE_S  = ARGS.gamble_ms / 1000                    # 赌说完
@@ -742,5 +743,19 @@ if __name__ == "__main__":
     vm.utils.get("asr").feed(_np.zeros(9600, dtype=_np.float32))   # 拉起模型并跑一块
     vm.utils.get("asr").reset()
     vm.utils.get("vad").is_speech(_np.zeros(512, dtype=_np.float32))
+    # 感知那套（场景 AST / 声纹 3D-Speaker / 情绪 SenseVoice）也要预热。
+    # 实测第一次 preprocess 要 2120ms（全在加载模型），之后稳定在 340–410ms。
+    # 不预热的话那 2 秒会落在用户说完第一句的时候，正是最不该卡的位置。
+    print("[web] 预热 感知（场景 / 声纹 / 情绪）…", flush=True)
+    import tempfile
+    import soundfile as _sf
+    _warm = Path(tempfile.gettempdir()) / "voicemem_warmup.wav"
+    _sf.write(_warm, _np.zeros(16000, dtype=_np.float32), 16000)
+    try:
+        vm.preprocess("预热", audio=str(_warm))
+    except Exception as _e:
+        print(f"[web] 感知预热跳过：{_e}", flush=True)
+    finally:
+        _warm.unlink(missing_ok=True)
     print("[web] 就绪", flush=True)
     uvicorn.run(app, host=ARGS.host, port=ARGS.port)
