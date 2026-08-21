@@ -7,7 +7,7 @@ LLM/TTS/Realtime 流、以及 FastAPI + WebSocket 接线。run.py 只管把这�
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
@@ -66,9 +66,13 @@ def realtime_connect(reply=None):
 
 
 # ── SearchResult → 脑图 html 认识的 memory_hits 负载 ──────────────────────────
-def hits_payload(result):
+def hits_payload(result, has_audio=None):
+    """has_audio(memory_id) -> bool：这条记忆有没有存档的原音频。
+    有的话前端给一个播放按钮——"我上周五听的那首歌"能被原样放回来。"""
     return {
-        "left_brain": [{"text": h.text, "score": h.score, "attributed_to": h.attributed_to}
+        "left_brain": [{"text": h.text, "score": h.score, "attributed_to": h.attributed_to,
+                        "memory_id": h.memory_id,
+                        "has_audio": bool(has_audio and has_audio(h.memory_id))}
                        for h in result.hits],
         "right_brain_hits": [{"content": h.content, "source": h.source, "priority": h.priority}
                              for h in (getattr(result, "rb_hits", None) or [])],
@@ -78,7 +82,7 @@ def hits_payload(result):
 
 
 # ── FastAPI + WS 接线（仅接线，渲染都在 index.html）─────────────────────────────
-def build_app(mode, session, classify, snapshot=None):
+def build_app(mode, session, classify, snapshot=None, audio_of=None):
     """session(sock)：run.py 传入的会话循环（llm_tts / realtime）。classify(query)：给脑图生长用。
     snapshot()：库里已有的记忆，前端打开页面时先把脑图铺满。"""
     app = FastAPI()
@@ -103,6 +107,13 @@ def build_app(mode, session, classify, snapshot=None):
     @app.get("/api/memories")                        # 打开页面时先铺已有记忆
     def api_memories() -> dict:
         return snapshot() if snapshot else {"left": [], "right": []}
+
+    @app.get("/api/audio/{memory_id}")               # 把当时那段原声放回来
+    def api_audio(memory_id: str):
+        path = audio_of(memory_id) if audio_of else None
+        if not path or not Path(path).exists():
+            raise HTTPException(404, "这条记忆没有存档音频")
+        return FileResponse(path, media_type="audio/wav")
 
     (HERE / "images").mkdir(exist_ok=True)
     app.mount("/images", StaticFiles(directory=HERE / "images"), name="images")

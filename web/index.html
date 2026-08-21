@@ -168,6 +168,9 @@
     opacity:.55;transition:opacity .5s ease;pointer-events:none;border-radius:50%}
   #orb.on{opacity:1}
   #app.rail-collapsed #orb{opacity:0}
+  .play{margin:0 6px;padding:0 5px;background:none;border:1px solid rgba(255,255,255,.28);
+    border-radius:3px;color:#8fc6ff;font-size:10px;line-height:1.5;cursor:pointer}
+  .play:hover{color:#fff;border-color:rgba(255,255,255,.6)}
   .rail-sec{margin:4px 0 16px}
   .rail-sec>h2{margin:0 0 6px;font-family:var(--serif);font-style:italic;font-weight:400;font-size:13.5px}
   .rail-sec.l>h2 em{color:#7fb2e8;font-style:italic}
@@ -1002,7 +1005,9 @@ window.brainAdd = function(side, kind, label, slot){
       window.brainActivate && window.brainActivate({schemas, kinds});
     },
     setRecall: (side, items) => { $(side==='r'?'recallR':'recallL').innerHTML = items.map(
-      it => `<li><span>${it.text}</span><span class="sc">${it.score}</span></li>`).join(''); },
+      it => `<li><span>${it.text}</span>` +
+            (it.mid ? `<button class="play" data-mid="${it.mid}" title="放当时那段原声">▶</button>` : '') +
+            `<span class="sc">${it.score}</span></li>`).join(''); },
     activate: o => window.brainActivate && window.brainActivate(o),
     clear:   () => window.brainClear && window.brainClear(),
   };
@@ -1064,7 +1069,8 @@ window.brainAdd = function(side, kind, label, slot){
                 'right=', (m.right_brain_hits||[]).length, 'scene=', m.current_scene);
     if(m.related_summaries) Object.assign(window.SLOT_SUMMARIES, m.related_summaries);
     const trunc = s => { s = String(s||''); return s.length>42 ? s.slice(0,42)+'…' : s; };
-    const left  = (m.left_brain||[]).slice(0,5).map(h=>({text:trunc(h.text),    score:(h.score||0).toFixed(2)}));
+    const left  = (m.left_brain||[]).slice(0,5).map(h=>({text:trunc(h.text), score:(h.score||0).toFixed(2),
+                                                        mid: h.has_audio ? h.memory_id : ''}));
     const right = (m.right_brain_hits||[]).slice(0,5).map(h=>({text:trunc(h.content), score:(h.priority||0).toFixed(2)}));
     window.vm.setRecall('l', left);
     window.vm.setRecall('r', right);
@@ -1302,6 +1308,20 @@ window.brainAdd = function(side, kind, label, slot){
     textIn.value=''; window.vm.setInput(t); curSlots=[];
     try{ await openWS(); }catch(err){ return; }
     ws.send(JSON.stringify({type:'user_text', text:t}));
+  });
+
+
+  // 记忆卡片上的 ▶：把这条记忆当时那段原声放回来（GET /api/audio/{memory_id}）。
+  // 事件委托绑在容器上——卡片每轮都重绘，绑在按钮上会随着重绘失效。
+  let memAudio = null;
+  document.addEventListener('click', e=>{
+    const b = e.target.closest('.play[data-mid]'); if(!b) return;
+    if(memAudio){ memAudio.pause(); memAudio = null; }
+    stopPlayback();                       // 先把助手正在说的掐掉，别叠在一起
+    memAudio = new Audio('/api/audio/' + b.dataset.mid);
+    b.textContent = '⏸';
+    memAudio.onended = memAudio.onerror = ()=>{ b.textContent = '▶'; memAudio = null; };
+    memAudio.play().catch(err=>{ console.warn('[audio] 播放失败', err); b.textContent='▶'; });
   });
 
   startOrb();          // 流线常驻：没接麦克风时按 idleAmp 缓慢呼吸

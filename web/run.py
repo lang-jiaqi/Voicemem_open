@@ -29,6 +29,7 @@ import base64
 import json
 import os
 import sys
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -104,6 +105,30 @@ REPLY = CONFIG.get("reply")                           # 传给 utils 的回复�
 vm = VoiceMem.from_config(CONFIG)
 
 
+#: 语音轮的音频落在这儿。归档表存的是路径，文件本身得真的在。
+TURN_AUDIO_DIR = _ROOT / "results" / "turn_audio"
+
+
+def save_turn_audio(pcm16k) -> str:
+    """把这一轮的 PCM 存成 wav，返回路径；存不下就返回 ""（不影响这一轮对话）。
+
+    没有这一步，AudioArchive 里一条记录都不会有——它只在 ingest 收到 audio_path
+    时才写。之前 demo 全程走 WS 流、从不落盘，所以"把当时那段原声放回来"做不到。
+    """
+    if pcm16k is None or not len(pcm16k):
+        return ""
+    try:
+        import numpy as np
+        import soundfile as sf
+        TURN_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+        path = TURN_AUDIO_DIR / f"turn_{uuid.uuid4().hex[:12]}.wav"
+        sf.write(path, np.asarray(pcm16k, dtype="float32"), 16000)
+        return str(path)
+    except Exception as e:
+        print(f"[web] 存本轮音频失败（不影响对话）：{e}", flush=True)
+        return ""
+
+
 @dataclass
 class Pending:
     """一轮说完时、投机预取早已算好的「预算记忆」——控制流拿来直接回复，不再搜。"""
@@ -111,6 +136,8 @@ class Pending:
     memory_context: str
     result: object
     spoken: bool = True          # True=语音轮（音频已进 realtime 缓冲），False=打字轮
+    audio_path: str = ""         # 这一轮落盘的 wav；ingest 拿它做场景/音乐/声纹感知，
+                                 # 并在 audio_archive 里跟记忆绑定，之后能原样放回来
 
 
 # ══════════════════ 两条控制流（各 ~10 行，只消费预取好的 Pending）══════════════════
@@ -127,7 +154,7 @@ async def voicemem_llm_tts(pending, send, send_audio):
     ~1.2s，加上生成那几秒，用户看着字干等）。
     """
     await send({"type": "user_transcript", "text": pending.text})
-    await send({"type": "memory_hits", **utils.hits_payload(pending.result)})
+    await send({"type": "memory_hits", **utils.hits_payload(pending.result, has_audio=audio_of)})
     await send({"type": "answer_start"})
 
     queue: asyncio.Queue = asyncio.Queue()
@@ -160,7 +187,8 @@ async def voicemem_llm_tts(pending, send, send_audio):
     # 先落记忆再等放完：ingest 排在音频后面的话，用户一听完就关页面（语音场景很
     # 常见），send_audio 抛 WebSocketDisconnect，这一轮就永远存不进去。
     # async_facts=True：抽事实走后台，不堵住读麦克风那条线。
-    vm.ingest(pending.text, agent_reply=reply, async_facts=True)   # 两半一起存
+    vm.ingest(pending.text, agent_reply=reply, async_facts=True,
+              audio=pending.audio_path or None)   # 两半一起存
     await speaker
 
 
@@ -184,7 +212,7 @@ async def start_realtime_turn(pending, conn, send):
     response.done 会被下一轮读到，当成自己说完了。
     """
     await send({"type": "user_transcript", "text": pending.text})
-    await send({"type": "memory_hits", **utils.hits_payload(pending.result)})
+    await send({"type": "memory_hits", **utils.hits_payload(pending.result, has_audio=audio_of)})
     if pending.spoken:
         await conn.input_audio_buffer.commit()
     else:
@@ -263,7 +291,8 @@ async def anticipate(sock, on_frame=None, on_speech=None):
             await sock.send_json({"type": "partial_transcript", "text": st.text, "replace": True})
         if st.turn:                                           # VAD 确认说完 → 记忆早已预取好
             last_partial = ""
-            yield Pending(st.turn.text, st.turn.memory_context, st.turn.result, spoken=True)
+            yield Pending(st.turn.text, st.turn.memory_context, st.turn.result,
+                          spoken=True, audio_path=save_turn_audio(getattr(st, "_pcm", None)))
 
 
 # ══════════════════ 每种 mode 的会话循环 ══════════════════
@@ -316,8 +345,16 @@ async def realtime_session(sock):
                 真正听到的那部分——跟 llm_tts 那边 capture() 的取舍一致。"""
                 p, reply = turn["pending"], turn["reply"]
                 turn.update(live=False, reply="", pending=None)
-                if p is not None:
-                    vm.ingest(p.text, agent_reply=reply, async_facts=True)
+                if p is None:
+                    return
+                # 存记忆失败不能连累这条会话：close_turn 是在常驻事件泵里调的，
+                # 抛出去会打死那个 Task，而 Task 的异常没人 await 就被静默丢弃——
+                # 表现是"整个会话突然不响应了，日志里一个字都没有"。
+                try:
+                    vm.ingest(p.text, agent_reply=reply, async_facts=True,
+                              audio=p.audio_path or None)
+                except Exception as e:
+                    print(f"[web] 存这一轮失败：{type(e).__name__}: {e}", flush=True)
 
             async def pump():
                 """常驻事件泵：OpenAI 的事件流只有这一个消费者。
@@ -400,6 +437,19 @@ def _rb_cluster(m) -> str:
     return "emotion" if emo not in _CALM else "experiences"
 
 
+def audio_of(memory_id: str) -> str:
+    """这条记忆当时那段原声在哪；没归档过、或已过保留期被清掉，返回 ""。
+
+    走核心的 GetOriginalAudio——它已经带了"文件还在不在"的检查，不用在这儿重写。
+    """
+    try:
+        r = vm._o._audio.GetOriginalAudio(memory_id)
+        return r.get("audio_path") or "" if r.get("found") else ""
+    except Exception as e:
+        print(f"[web] 查存档音频失败：{e}", flush=True)
+        return ""
+
+
 def memory_snapshot(limit: int = 48) -> dict:
     """库里已有的记忆，供前端在打开页面时把脑图先铺满。
 
@@ -435,7 +485,7 @@ def memory_snapshot(limit: int = 48) -> dict:
     return {"left": left, "right": right}
 
 
-app = utils.build_app(MODE, realtime_session if MODE == "realtime" else llm_tts_session, vm.classify, memory_snapshot)
+app = utils.build_app(MODE, realtime_session if MODE == "realtime" else llm_tts_session, vm.classify, memory_snapshot, audio_of)
 
 
 if __name__ == "__main__":
