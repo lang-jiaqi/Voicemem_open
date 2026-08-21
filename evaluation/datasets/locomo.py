@@ -19,6 +19,9 @@ from __future__ import annotations
 import json
 import re
 
+#: 打印用的名字（CLI 上的键是小写的 "locomo"）
+NAME = "LoCoMo"
+
 from evaluation.datasets import Conversation, Question, Score, Turn
 
 #: LoCoMo 的题型编号 → 人话，出分类得分用

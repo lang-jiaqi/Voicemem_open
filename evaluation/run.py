@@ -107,7 +107,7 @@ def run_conversation(conv, args, answer_llm, judge_llm) -> dict:
             vm.ingest(turn.text, speaker=turn.speaker or "user",
                       observed_at=turn.observed_at or None, async_facts=False)
         except Exception as e:
-            print(f"  [{conv.id}] ingest 失败（跳过这句）：{e}", flush=True)
+            print(f"  [{conv.id}] ingest failed (skipping this turn): {e}", flush=True)
     ingest_s = time.time() - t0
 
     items, got, total = [], 0.0, 0.0
@@ -199,12 +199,12 @@ def main() -> None:
         convs = convs[:args.limit]
 
     if args.inspect:                        # 先确认解析对了再花钱跑
-        print(f"解析出 {len(convs)} 段对话，"
-              f"共 {sum(len(c.questions) for c in convs)} 个问题\n")
+        print(f"Parsed {len(convs)} conversations, "
+              f"{sum(len(c.questions) for c in convs)} questions\n")
         for c in convs[:2]:
-            print(f"[{c.id}] {len(c.turns)} 轮 / {len(c.questions)} 题")
+            print(f"[{c.id}] {len(c.turns)} turns / {len(c.questions)} questions")
             for t in c.turns[:3]:
-                print(f"   {t.observed_at or '(无时间)'} {t.speaker}: {t.text[:60]}")
+                print(f"   {t.observed_at or '(no date)'} {t.speaker}: {t.text[:60]}")
             for q in c.questions[:2]:
                 print(f"   Q: {q.text[:60]}")
                 print(f"   A: {q.answer[:60]}" if q.answer else f"   rubric: {q.rubric[:2]}")
@@ -215,17 +215,17 @@ def main() -> None:
     if args.resume and out.exists():
         done = {r["conversation_id"]: r
                 for r in json.loads(out.read_text(encoding="utf-8")).get("results", [])}
-        print(f"续跑：已完成 {len(done)} 段，跳过", flush=True)
+        print(f"Resuming: {len(done)} conversations already done, skipping", flush=True)
 
     prov = provenance()
     if prov["git_dirty"]:
-        print("警告：工作区有未提交改动，这次的数字对不回某个 commit", flush=True)
+        print("Warning: working tree is dirty; these numbers map to no commit", flush=True)
     answer_llm, judge_llm = make_llm(args.answer_model), make_llm(args.judge)
     todo = [c for c in convs if c.id not in done]
     results = list(done.values())
 
-    print(f"{args.dataset}：{len(todo)} 段对话待跑（答案模型 {args.answer_model} / "
-          f"裁判 {args.judge} / top_k={args.top_k}）", flush=True)
+    print(f"{datasets.display_name(args.dataset)}: {len(todo)} conversations to run "
+          f"(answer={args.answer_model}, judge={args.judge}, top_k={args.top_k})", flush=True)
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = {pool.submit(run_conversation, c, args, answer_llm, judge_llm): c
@@ -235,7 +235,7 @@ def main() -> None:
             try:
                 r = fut.result()
             except Exception as e:
-                print(f"  [{conv.id}] 整段失败：{e}", flush=True)
+                print(f"  [{conv.id}] failed: {e}", flush=True)
                 continue
             results.append(r)
             acc = r["score"] / r["total"] if r["total"] else 0
@@ -249,16 +249,19 @@ def main() -> None:
                                       ensure_ascii=False, indent=2), encoding="utf-8")
 
     s = summarize(results, args.dataset)
-    print(f"\n{'=' * 56}")
-    print(f"{args.dataset}  {s['conversations']} 段对话 · {s['questions']} 题")
-    print(f"得分 {s['score']:.0f}/{s['total']:.0f}  =  {s['accuracy']:.1%}")
+    name = datasets.display_name(args.dataset)
+    print(f"\n{name}: {s['conversations']} conversations \u00b7 {s['questions']} questions\n")
+    print(f"Score: {s['score']:.0f}/{s['total']:.0f} = {s['accuracy']:.1%}\n")
     if len(s["by_category"]) > 1:
+        width = max(len(k) for k in s["by_category"])
         for k, v in s["by_category"].items():
-            print(f"   {k:<24} {v:.1%}")
-    print(f"检索中位数 {s['median_search_ms']:.0f}ms · 记忆中位数 {s['median_memory_tokens']} tokens")
-    print(f"结果已存 {out}")
+            print(f"  {k:<{width + 2}}{v:.1%}")
+        print()
+    print(f"Median retrieval latency: {s['median_search_ms']:.0f} ms")
+    print(f"Median retrieved memory: {s['median_memory_tokens']} tokens")
+    print(f"\nSaved to {out}")
     if args.no_score:
-        print(f"未判分。判分：python evaluation/score.py --file {out}")
+        print(f"Not scored. Score with: python evaluation/score.py --file {out}")
 
 
 if __name__ == "__main__":

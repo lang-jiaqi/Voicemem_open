@@ -65,6 +65,11 @@ def names() -> list[str]:
     return sorted(DATASETS)
 
 
+def display_name(name: str) -> str:
+    """打印用的名字，数据集模块里的 NAME；没写就用 CLI 上的键。"""
+    return getattr(get(name), "NAME", name)
+
+
 def get(name: str):
     """按名字拿数据集适配器。"""
     import importlib
