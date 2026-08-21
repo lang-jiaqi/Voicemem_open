@@ -262,6 +262,13 @@
     background:none;color:var(--dim);font-size:12px;letter-spacing:.06em;cursor:pointer}
   .switch button.on{color:#fff;border-color:rgba(255,255,255,.5);
     background:rgba(255,255,255,.06)}
+  .dl{margin-left:auto;display:flex;gap:6px;align-items:center}
+  .dl-name{width:150px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;
+    background:rgba(255,255,255,.03);color:#dfe4ee;font-size:11.5px;font-family:inherit}
+  .dl-name:focus{outline:none;border-color:rgba(255,255,255,.45)}
+  .dl-btn{padding:5px 12px;border:1px solid var(--line);border-radius:999px;
+    background:none;color:var(--dim);font-size:12px;cursor:pointer}
+  .dl-btn:hover{color:#fff;border-color:rgba(255,255,255,.5)}
   .view{flex:1;min-height:0;position:relative;overflow:hidden}
   .view.hide{display:none}
   .brainwrap{position:relative;width:100%;height:100%;overflow:hidden}
@@ -375,6 +382,10 @@
     <div class="switch">
       <button id="tabChat" class="on">Chat</button>
       <button id="tabMem">Memory Space</button>
+      <div class="dl">
+        <input id="dlName" class="dl-name" value="voicemem-memories" spellcheck="false" />
+        <button id="dlBtn" class="dl-btn">下载记忆</button>
+      </div>
     </div>
 
     <div class="view" id="viewChat">
@@ -1482,6 +1493,56 @@ window.brainAdd = function(side, kind, label, slot){
 
   document.getElementById('sessList').addEventListener('click', onSessionListClick);
   document.getElementById('newSess').addEventListener('click', newSession);
+
+
+  /* ---- 一键下载记忆 ----
+     直接拿 /api/memories 那份快照（打开页面铺脑图用的就是它），存成 json。
+     文件名用输入框里的，留空就用默认的。 */
+
+  function safeFileName(name) {
+    var n = name.trim();
+    if (n === '') n = 'voicemem-memories';
+    n = n.replace(/[\\/:*?"<>|]/g, '-');      // 这些字符在文件名里不合法
+    if (n.slice(-5) !== '.json') n = n + '.json';
+    return n;
+  }
+
+  function saveTextAsFile(text, fileName) {
+    var blob = new Blob([text], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  async function downloadMemories() {
+    var btn = document.getElementById('dlBtn');
+    var old = btn.textContent;
+    btn.textContent = '导出中…';
+    try {
+      var res = await fetch('/api/memories');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var data = await res.json();
+      var out = {
+        exported_at: new Date().toISOString(),
+        left_brain: data.left || [],
+        right_brain: data.right || []
+      };
+      var name = safeFileName(document.getElementById('dlName').value);
+      saveTextAsFile(JSON.stringify(out, null, 2), name);
+      btn.textContent = '已下载';
+    } catch (err) {
+      console.warn('[download] 失败', err);
+      btn.textContent = '下载失败';
+    }
+    setTimeout(function () { btn.textContent = old; }, 1600);
+  }
+
+  document.getElementById('dlBtn').addEventListener('click', downloadMemories);
 
   /* ---- 右板块：Chat / Memory Space 切换 ---- */
   function showChat() {
