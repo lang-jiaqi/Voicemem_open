@@ -274,14 +274,21 @@
   .brainwrap{position:relative;width:100%;height:100%;overflow:hidden}
 
   /* Chat 视图：当前 session 的一来一回原文 */
-  .chat{height:100%;overflow:auto;padding:20px 26px}
-  .chat .turn{max-width:62ch;margin:0 0 18px}
-  .chat .who{font-size:11px;letter-spacing:.14em;text-transform:uppercase;
-    color:var(--dim);margin-bottom:5px}
-  .chat .said{font-size:14px;line-height:1.62;white-space:pre-wrap}
-  .chat .turn.user .who{color:#8fc6ff}
-  .chat .turn.ai .who{color:#e879a8}
-  .chat .empty{color:var(--dim);font-size:13px;padding-top:40px;text-align:center}
+  /* 对话气泡：你的靠右、蓝色实心；VoiceMem 的靠左、白色描边 */
+  .chat{height:100%;overflow:auto;padding:22px 26px;
+    display:flex;flex-direction:column;gap:14px}
+  .chat .turn{max-width:74%;display:flex;flex-direction:column;gap:4px}
+  .chat .turn.user{align-self:flex-end;align-items:flex-end}
+  .chat .turn.ai{align-self:flex-start;align-items:flex-start}
+  .chat .who{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--dim);padding:0 4px}
+  .chat .said{font-size:14px;line-height:1.6;white-space:pre-wrap;
+    padding:10px 14px;border-radius:14px}
+  .chat .turn.user .said{background:#2f6fd0;color:#fff;
+    border:1px solid #2f6fd0;border-bottom-right-radius:4px}
+  .chat .turn.ai .said{background:transparent;color:#e8ecf3;
+    border:1px solid rgba(255,255,255,.5);border-bottom-left-radius:4px}
+  .chat .empty{align-self:center;color:var(--dim);font-size:13px;padding-top:40px}
 
   /* sidebar：session 列表 */
   .sess-new{display:block;width:100%;margin:0 0 12px;padding:7px 10px;
