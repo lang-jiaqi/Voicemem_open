@@ -73,7 +73,8 @@ ARGS = _parse(None if __name__ == "__main__" else [])
 import utils                                         # noqa: E402  同目录管道层
 from voicemem import VoiceMem                        # noqa: E402
 
-BARGE_DEBUG = os.environ.get("BARGE_DEBUG", "1") != "0"   # 打断为什么没触发：看这几行日志
+BARGE_DEBUG = os.environ.get("BARGE_DEBUG", "1") != "0"
+BARGE_THRESHOLD = float(os.environ.get("BARGE_THRESHOLD", "0.3"))   # 越小越容易被打断   # 打断为什么没触发：看这几行日志
 MODE = ARGS.mode                                     # llm_tts | realtime
 SPEC_MIN_CHARS = ARGS.spec_min_chars                 # partial 起投机
 GAMBLE_S  = ARGS.gamble_ms / 1000                    # 赌说完
@@ -218,7 +219,10 @@ _RT_PERSONA = (
     "· HOW TO SPEAK 里的内容——只影响你的语气、先说什么、什么别碰。"
     "一个字都不要说出来。听出他心情不好就先接住情绪再说事；"
     "知道他不好意思开口，就别追问；知道他讨厌什么，就绕开。\n"
-    "别复述他刚说的话，别用「我记得你说过」开头，别念清单。"
+    "别复述他刚说的话，别用「我记得你说过」开头，别念清单。\n"
+    "说话方式：像朋友聊天那样有起伏——该笑就笑出来，替他高兴就热一点，"
+    "他难过就把语速放慢、声音压低。用「嗯」「哎」「诶」这种口头反应开头，"
+    "不要播音腔，不要每句都四平八稳。句子短，一次说一两句就停。"
 )
 
 
@@ -402,10 +406,19 @@ async def realtime_session(sock):
             #                              本地 VAD（隔着 AEC + 网络 + 重采样）可靠
             await conn.session.update(session={
                 "type": "realtime",
-                "audio": {"input": {"turn_detection": {
-                    "type": "server_vad", "create_response": False,
-                    "interrupt_response": True,
-                }}},
+                "audio": {
+                    "input": {"turn_detection": {
+                        "type": "server_vad", "create_response": False,
+                        "interrupt_response": True,
+                        # 默认 0.5 对插话太钝——人隔着扬声器说话，回声消除处理过
+                        # 之后信号本来就弱，够不到阈值就等于打不断。调低到 0.3，
+                        # 并把判定人声所需的静音缩短，抢答一点也比闷头说完好。
+                        "threshold": BARGE_THRESHOLD,
+                        "prefix_padding_ms": 200,
+                        "silence_duration_ms": 320,
+                    }},
+                    "output": {"voice": utils.RT_VOICE},
+                },
             })
             connected = True
 

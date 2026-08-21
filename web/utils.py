@@ -21,6 +21,10 @@ from voicemem.leftbrain.local_e5_embedder import LocalE5Embedder, shared_e5  # n
 HERE = Path(__file__).resolve().parent
 CHAT_MODEL = os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o")
 RT_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime")
+#: realtime 的音色。一直没设过，默认那个（alloy）念起来最平。
+#: gpt-realtime 上可选：alloy / ash / ballad / coral / echo / sage / shimmer /
+#: verse / marin / cedar —— marin 和 cedar 是新加的，起伏和呼吸感明显强。
+RT_VOICE = os.environ.get("OPENAI_REALTIME_VOICE", "marin")
 client = AsyncOpenAI()
 
 
