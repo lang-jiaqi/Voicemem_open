@@ -164,10 +164,9 @@
   .rail-body{flex:1;overflow:auto;padding:14px 14px 24px;transition:opacity .2s}
   #app.rail-collapsed .rail-body,#app.rail-collapsed .rail-top h1{opacity:0;pointer-events:none}
   /* 流线动效：常驻，没声音时静态呼吸，有输入时大幅波动 */
-  #orb{display:block;width:132px;height:132px;margin:8px auto 2px;
-    opacity:.55;transition:opacity .5s ease;pointer-events:none;border-radius:50%}
+  #orb{display:block;flex:0 0 auto;width:112px;height:112px;margin:0 auto 2px;
+    opacity:.6;transition:opacity .5s ease;pointer-events:none;border-radius:50%}
   #orb.on{opacity:1}
-  #app.rail-collapsed #orb{opacity:0}
   .play{margin:0 6px;padding:0 5px;background:none;border:1px solid rgba(255,255,255,.28);
     border-radius:3px;color:#8fc6ff;font-size:10px;line-height:1.5;cursor:pointer}
   .play:hover{color:#fff;border-color:rgba(255,255,255,.6)}
@@ -194,7 +193,11 @@
   .block-h{flex:0 0 auto;display:flex;align-items:center;gap:9px;margin-bottom:10px;
     font-size:10px;letter-spacing:.24em;text-transform:uppercase;color:#7d8496}
   .block-h::after{content:"";flex:1;height:1px;background:var(--line)}
-  .io-in{flex:0 0 auto}.recall{flex:1 1 auto;min-height:0}.io-out{flex:0 0 auto}
+  /* 召回框只要够看出"每轮取到的东西不一样"就行，不占满高度；
+     省下的给回复——那才是要让人读的地方。 */
+  .io-in{flex:0 0 auto}
+  .recall{flex:0 0 auto;max-height:190px}
+  .io-out{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
   .live-text{font-family:var(--serif);font-size:15px;line-height:1.5;color:#eef1f7;min-height:23px}
   .textin{width:100%;box-sizing:border-box;margin-top:10px;font-size:13px;padding:8px 10px;
     border:1px solid var(--line);border-radius:8px;background:#12151b;color:#e8ecf5;font-family:var(--serif)}
@@ -209,6 +212,8 @@
   .tag.ent{border-color:rgba(74,168,240,.45);color:#9fd0ff}
   .tag.sch{border-color:rgba(88,224,141,.45);color:#8ce9b3}
   .recall-cols{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .recall .rc ul{overflow:auto}          /* 条目多了自己滚，不把框撑开 */
+  .io-out .reply{flex:1;min-height:0;overflow:auto}
   .rc{display:flex;flex-direction:column;min-height:0}
   .rc-h{flex:0 0 auto;font-size:11px;letter-spacing:.1em;margin-bottom:7px}
   .rc.l .rc-h{color:#7fb2e8}.rc.r .rc-h{color:#e879a8}
@@ -253,8 +258,6 @@
       <h1>VoiceMem</h1>
       <button class="rail-toggle" id="railToggle" title="收起 / 展开">‹</button>
     </div>
-    <!-- 麦克风声纹环：对话时随音量扭动，侧栏收起时一并隐藏 -->
-    <canvas id="orb" width="264" height="264" aria-hidden="true"></canvas>
     <div class="rail-body">
       <section class="rail-sec l">
         <h2><em>Informative</em> · 左脑记忆（SlotV2 槽位）</h2>
@@ -287,6 +290,8 @@
 
   <!-- ② 中间：上下三块 -->
   <section class="center">
+    <!-- 流线动效：常驻，说话时随音量大幅起伏 -->
+    <canvas id="orb" width="264" height="264" aria-hidden="true"></canvas>
     <!-- 上：每轮流式输入 + 情绪/实体/schema 标签 -->
     <div class="block io-in">
       <div class="block-h">流式输入 · Live input</div>
