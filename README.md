@@ -59,7 +59,8 @@
 * [🚀 快速开始](#-快速开始)
 * [🧠 VoiceMem 双脑流式架构](#-voicemem基于流式双脑架构的记忆系统)
 * [🤖 VoiceMem 官方记忆模型](#-voicemem-模型系列)
-* [🔌 自定义模型](#-连接自己的语音模型)
+* [🔌 使用 VoiceMem 定制你的语音智能体](#-使用-voicemem-定制你的语音智能体)
+* [🛠️ 模型微调](#️-模型微调)
 * [📊 评测代码](#-评测)
 * [致谢](#致谢)
 * [许可证](#许可证)
@@ -229,9 +230,9 @@ VoiceMem 家族开源模型包括 **Qwen2.5-Omni、Qwen3-Omni 和 Step-Audio2-Mi
   <img src="./docs/images/fig-opd.webp" alt="VoiceMem OPD 流程" width="90%">
 </p>
 
-## 🔌 连接自己的语音模型
+## 🔌 使用 VoiceMem 定制你的语音智能体
 
-你可以将 VoiceMem 接入自己的微调模型，用于实时语音对话。
+你可以将 VoiceMem 接入自己的语音模型，用于构建带有长期记忆能力的实时语音智能体。
 
 整体流程如下：
 
@@ -247,7 +248,9 @@ export OPENAI_API_KEY=sk-...
 python examples/04_voice_agent_own_model.py
 ```
 
-### 训练自己的 Adapter
+## 🛠️ 模型微调
+
+VoiceMem 提供完整的微调代码，可用于训练自己的 VoiceMem Model Family Adapter。
 
 默认训练配置与发布的 `checkpoint-3318` 使用的配置一致。
 

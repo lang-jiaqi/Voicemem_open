@@ -59,7 +59,8 @@ A quick overview of VoiceMem:
 * [🚀 Quick Start](#-quick-start)
 * [🧠 VoiceMem Dual-Brain Streaming Architecture](#-voicemem-memory-with-a-streaming-dual-brain-architecture)
 * [🤖 VoiceMem Model Families](#-voicemem-model-families)
-* [🔌 Use Your Own Model](#-voice-chat-with-your-own-model)
+* [🔌 Customize Your Voice Agent with VoiceMem](#-customize-your-voice-agent-with-voicemem)
+* [🛠️ Finetuning](#️-finetuning)
 * [📊 Evaluation](#-evaluation)
 * [Acknowledgements](#acknowledgements)
 * [License](#license)
@@ -230,9 +231,9 @@ The open-source VoiceMem model family includes **Qwen2.5-Omni, Qwen3-Omni, and S
   <img src="./docs/images/fig-opd.webp" alt="VoiceMem OPD Pipeline" width="90%">
 </p>
 
-## 🔌 Voice Chat with Your Own Model
+## 🔌 Customize Your Voice Agent with VoiceMem
 
-You can connect VoiceMem to your own fine-tuned model for real-time voice conversations.
+You can integrate VoiceMem with your own voice model to build a real-time voice agent with long-term memory.
 
 The basic flow is:
 
@@ -248,7 +249,9 @@ export OPENAI_API_KEY=sk-...
 python examples/04_voice_agent_own_model.py
 ```
 
-### Train Your Own Adapter
+## 🛠️ Finetuning
+
+VoiceMem provides the complete finetuning pipeline for training your own VoiceMem Model Family adapter.
 
 The default training configuration matches the one used for the released `checkpoint-3318`.
 
