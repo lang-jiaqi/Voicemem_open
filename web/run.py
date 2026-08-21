@@ -81,7 +81,9 @@ BARGE_THRESHOLD = float(os.environ.get("BARGE_THRESHOLD", "0.45"))  # 越小越�
 BARGE_MIN_MS = int(os.environ.get("BARGE_MIN_MS", "280"))
 #: 助手刚开口那一小段不允许被打断——那时候麦克风里几乎只有它自己的声音。
 BARGE_GRACE_MS = int(os.environ.get("BARGE_GRACE_MS", "500"))
-MIC_RATE = 24000                       # 前端上行的采样率（index.html 的 SAMPLE_RATE）   # 打断为什么没触发：看这几行日志
+MIC_RATE = 24000                       # 前端上行的采样率（index.html 的 SAMPLE_RATE）
+#: 按声纹拦陌生人。默认关——声纹那套模型一次 ~2 秒，多人场景才值得付这个钱。
+SPEAKER_GATE = os.environ.get("VOICEMEM_SPEAKER_GATE", "0") != "0"   # 打断为什么没触发：看这几行日志
 MODE = ARGS.mode                                     # llm_tts | realtime
 SPEC_MIN_CHARS = ARGS.spec_min_chars                 # partial 起投机
 GAMBLE_S  = ARGS.gamble_ms / 1000                    # 赌说完
@@ -309,13 +311,30 @@ async def _no_realtime(sock, err):
 # 全在核心 VoiceStream 里。这里只做 demo 该做的：搬 socket 帧、发 partial、把说完
 # 的一轮包成 Pending 交给控制流——demo 就是核心的使用示例，不再平行重写一套。
 
+async def resolve_speaker(state, owner) -> None:
+    """后台算这一轮是谁说的，供**下一轮**判断陌生人。
+
+    声纹那套模型一次要 ~2 秒，绝不能挡在回复前面——放线程里跑，算完写进 owner。
+    """
+    try:
+        sid = await asyncio.to_thread(lambda: getattr(state, "speaker_id", "") or "")
+    except Exception as e:
+        print(f"[web] 声纹识别失败：{e}", flush=True)
+        return
+    if not sid:
+        return
+    if not owner["id"]:
+        owner["id"] = sid                  # 第一个开口的算这场对话的主人
+    owner["last"] = sid
+
+
 async def anticipate(sock, on_frame=None, on_speech=None):
     """驱动核心流式会话，逐个 yield 确认回合的 Pending。
     on_frame(raw24k)：realtime 用它把原始音频平行喂给 OpenAI（方案 A）。
     on_speech()：本地 VAD 一听到人声就叫一次——realtime 拿它做打断（barge-in）。"""
     stream = vm.stream(spec_min_chars=SPEC_MIN_CHARS, gamble_s=GAMBLE_S, confirm_s=CONFIRM_S)
     last_partial = ""
-    owner = {"id": ""}                    # 这场对话第一个开口的声纹
+    owner = {"id": "", "last": ""}        # 主人的声纹 / 上一轮是谁
     speech_ms = 0.0                       # 连续听到人声多久了
     while True:
         msg = await sock.receive()
@@ -353,15 +372,20 @@ async def anticipate(sock, on_frame=None, on_speech=None):
             # 谁在说话。第一个开口的人算这场对话的主人；之后换了另一个声纹，
             # 就是陌生人——不能把主人的记忆讲给他听（"我是谁？"→"你是Jiaqi"
             # 这个 bug 就是因为检索从不看说话人）。
-            sid = getattr(st, "speaker_id", "") or ""
-            if sid and not owner["id"]:
-                owner["id"] = sid
-            stranger = bool(sid and owner["id"] and sid != owner["id"])
+            # 用上一轮算出来的说话人做判断，这一轮的放后台算。
+            # 直接读 st.speaker_id 会同步跑声纹+情绪+场景一整套模型——实测 2.1 秒，
+            # 而且是在事件循环里，这期间连 socket 都不读，麦克风帧全堆着，
+            # 表现就是"ASR 很卡"。代价是换人之后第一句仍按上一个人算。
+            stranger = bool(SPEAKER_GATE and owner["id"] and owner["last"]
+                            and owner["last"] != owner["id"])
             yield Pending(st.turn.text,
                           "" if stranger else st.turn.memory_context,
                           st.turn.result, spoken=True,
-                          audio_path=save_turn_audio(getattr(st, "_pcm", None)),
+                          audio_path=await asyncio.to_thread(
+                              save_turn_audio, getattr(st, "_pcm", None)),
                           stranger=stranger)
+            if SPEAKER_GATE:
+                asyncio.create_task(resolve_speaker(st, owner))
 
 
 # ══════════════════ 每种 mode 的会话循环 ══════════════════
