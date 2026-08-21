@@ -1010,7 +1010,9 @@ window.brainAdd = function(side, kind, label, slot){
   let playCtx=null, scheduled=[], nextPlay=0, replyText='';
 
   // 脑图去重：同一条记忆文本只长一次节点；再次命中就跳过（避免刷屏）
-  const seen = new Map(); let addedCount=0; const MAX_NODES=48;
+  // MAX_NODES 要能装下「开局铺的已有记忆」+「之后对话新长的」两部分。
+  // 48 只够铺开局（现有库就 60+ 条），说话时就再也长不出新节点了。
+  const seen = new Map(); let addedCount=0; const MAX_NODES=110;
   let curSlots = [];                           // 本轮 classify 出的 SlotV2 槽（左脑按此分）
   const SRC_KIND = { emotion_trait:'emotion', current_signal:'emotion', response_experience:'exper',
                      situation_pattern:'exper', profile:'prefer', relation:'exper' };
@@ -1109,14 +1111,16 @@ window.brainAdd = function(side, kind, label, slot){
     baseRadius: 0.34,                  // 静音时的半径（画布短边的比例）
     shrink: 0.45,                      // 电平越高基础半径收得越小——丝带向外张开，
                                        // 圆心那圈跟着收进来，峰值才不会顶出画布
-    idleAmp: 0.05, liveAmp: 1.05,      // 形变幅度：静音时近乎正圆（起伏 6%），满电平 138%
+    idleAmp: 0.14, liveAmp: 1.05,      // 形变幅度：静音时留一点花瓣（起伏 14%），不然转起来看不出来
     idleSpeed: 0.10, liveSpeed: 0.55,
-    rotSpeed: 0.09, lineWidth: 1.1,
+    rotSpeed: 0.50, liveRotSpeed: 1.30, // 整体自转：静音约 12s 一圈，说话时提到约 5s 一圈
+    strandRotSpread: 0.30,             // 三束差速，外束转得比内束快，织网才有层次
+    lineWidth: 1.1,
     liveSquish: 0.88,                  // 满电平时的纵向压扁；静音恒为 1（正圆）
     haloBlur: 5, haloAlpha: 0.38, midBlur: 2, midAlpha: 0.46,
     dark: [45, 115, 245], light: [170, 235, 255],   // 内圈鲜蓝 → 外圈亮青
   };
-  let orbAnalyser=null, orbLevel=0, orbPhase=0;
+  let orbAnalyser=null, orbLevel=0, orbPhase=0, orbRot=0;
   const orbData=new Uint8Array(128);
   const orbGlow=document.createElement('canvas');
 
@@ -1153,7 +1157,9 @@ window.brainAdd = function(side, kind, label, slot){
       const amp=ORB.idleAmp + (ORB.liveAmp-ORB.idleAmp)*orbLevel;
       const squish=1 - (1-ORB.liveSquish)*orbLevel;   // 静音正圆，说话时略压扁成花瓣
       orbPhase += dt*(ORB.idleSpeed + (ORB.liveSpeed-ORB.idleSpeed)*orbLevel);
-      const rot=now*0.001*ORB.rotSpeed;
+      // 按 dt 积分而不是用 now 直接算角度：转速随电平变化，直接乘会在电平跳变时闪一下
+      orbRot += dt*(ORB.rotSpeed + (ORB.liveRotSpeed-ORB.rotSpeed)*orbLevel);
+      const rot=orbRot;
       const R=Math.min(W,H)*ORB.baseRadius*(1-ORB.shrink*orbLevel);
 
       // ① 线条画到离屏画布（清晰、不带模糊）
@@ -1165,6 +1171,8 @@ window.brainAdd = function(side, kind, label, slot){
       const M=ORB.linesPerStrand, half=(M-1)/2, spacing=R*ORB.spacingFrac;
       g.strokeStyle=grad; g.lineWidth=ORB.lineWidth; g.lineJoin='round'; g.lineCap='round';
       for(let si=0; si<ORB.strands; si++){
+        const spin=rot*ORB.strandRotSpread*si;   // 每束再叠一点自己的转速
+        const cs=Math.cos(spin), sn=Math.sin(spin);
         for(let k=0;k<M;k++){
           const Rk=R+(k-half)*spacing;
           const edge=1-Math.abs(k-half)/(half+0.001);   // 束心亮、边缘透
@@ -1172,7 +1180,8 @@ window.brainAdd = function(side, kind, label, slot){
           for(let i=0;i<=ORB.points;i++){
             const th=(i/ORB.points)*Math.PI*2;
             const pt=orbPoint(th, orbPhase, si, Rk, amp, squish);
-            i===0 ? g.moveTo(pt.x,pt.y) : g.lineTo(pt.x,pt.y);
+            const x=pt.x*cs-pt.y*sn, y=pt.x*sn+pt.y*cs;
+            i===0 ? g.moveTo(x,y) : g.lineTo(x,y);
           }
           g.globalAlpha=0.50+0.50*edge; g.stroke();
         }
@@ -1266,6 +1275,19 @@ window.brainAdd = function(side, kind, label, slot){
   });
 
   startOrb();          // 流线常驻：没接麦克风时按 idleAmp 缓慢呼吸
+
+  // 打开页面先把库里已有的记忆铺成节点——不然一进来是张空图，看不出"它记得我"。
+  // 之后说话新增的节点走 onMemoryHits 那条路，两边共用 seen 去重，不会重复长。
+  (async ()=>{
+    try{
+      const r = await fetch('/api/memories');
+      if(!r.ok) return;
+      const m = await r.json();
+      for(const e of (m.left||[]))  growLeft(e.text, e.slot);
+      for(const e of (m.right||[])) growRight(SRC_KIND[e.kind]||'exper', e.text);
+      console.log('[seed] 已有记忆 left=',(m.left||[]).length,'right=',(m.right||[]).length);
+    }catch(e){ console.warn('[seed] 读取已有记忆失败', e); }
+  })();
 })();
 </script>
 </body>

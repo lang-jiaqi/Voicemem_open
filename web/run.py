@@ -366,7 +366,42 @@ async def realtime_session(sock):
         await _no_realtime(sock, e)
 
 
-app = utils.build_app(MODE, realtime_session if MODE == "realtime" else llm_tts_session, vm.classify)
+def memory_snapshot(limit: int = 48) -> dict:
+    """库里已有的记忆，供前端在打开页面时把脑图先铺满。
+
+    只读，不碰模型：左脑走 list_entries + 认知图的 slot 标注，右脑走 list_all。
+    库是空的（新用户）就返回空列表，前端照旧从空图开始长。
+    """
+    from voicemem.leftbrain.cognitive_graph.types import SlotV2
+
+    uid = vm._o._user_id
+    left, right = [], []
+    try:
+        repo = vm._o._get_repo()
+        entries = repo._vector_store.list_entries(user_id=uid)
+        # slot 标在认知图里，不在记忆条目上——先建 id -> slot 的反查表
+        cog = repo._cognitive_store
+        slot_of = {}
+        for slot in SlotV2:
+            for mid in cog.memory_ids_for_slots(uid, [slot]):
+                slot_of.setdefault(mid, slot.value)
+        for e in entries[:limit]:
+            # list_entries 的 date 直接截了 time_start 前 10 位，遇到纯时间串会切出
+            # "09:20:37" 这种。不像日期就置空，别把垃圾送到前端。
+            d = str(e.get("date", ""))
+            left.append({"text": e["text"], "date": d if d[:4].isdigit() else "",
+                         "slot": slot_of.get(e["id"], "daily_life")})
+    except Exception as e:
+        print(f"[web] 左脑快照读取失败：{e}", flush=True)
+    try:
+        for m in vm._o._right._rb_repo().list_all(uid)[:limit]:
+            right.append({"text": m.content, "kind": str(getattr(m.memory_class, "value", m.memory_class))})
+    except Exception as e:
+        print(f"[web] 右脑快照读取失败：{e}", flush=True)
+    return {"left": left, "right": right}
+
+
+app = utils.build_app(MODE, realtime_session if MODE == "realtime" else llm_tts_session, vm.classify, memory_snapshot)
 
 
 if __name__ == "__main__":

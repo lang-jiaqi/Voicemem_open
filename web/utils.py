@@ -78,8 +78,9 @@ def hits_payload(result):
 
 
 # ── FastAPI + WS 接线（仅接线，渲染都在 index.html）─────────────────────────────
-def build_app(mode, session, classify):
-    """session(sock)：run.py 传入的会话循环（llm_tts / realtime）。classify(query)：给脑图生长用。"""
+def build_app(mode, session, classify, snapshot=None):
+    """session(sock)：run.py 传入的会话循环（llm_tts / realtime）。classify(query)：给脑图生长用。
+    snapshot()：库里已有的记忆，前端打开页面时先把脑图铺满。"""
     app = FastAPI()
 
     @app.websocket("/ws")
@@ -98,6 +99,10 @@ def build_app(mode, session, classify):
     def api_classify(body: Q) -> dict:
         c = classify(body.query)
         return {"slots": list(c.slots), "entities": list(c.entities)}
+
+    @app.get("/api/memories")                        # 打开页面时先铺已有记忆
+    def api_memories() -> dict:
+        return snapshot() if snapshot else {"left": [], "right": []}
 
     (HERE / "images").mkdir(exist_ok=True)
     app.mount("/images", StaticFiles(directory=HERE / "images"), name="images")
