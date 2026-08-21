@@ -366,6 +366,22 @@ async def realtime_session(sock):
         await _no_realtime(sock, e)
 
 
+#: 偏好类的词面信号——右脑只有 heartnote / response_experience 两个 class，
+#: 光靠 class 分不出脑图上的 emotion / preference / experiences 三簇。
+_PREF_WORDS = ("喜欢", "爱好", "偏好", "习惯", "规律", "不吃", "过敏", "素食", "讨厌", "不喜欢", "放松")
+_CALM = ("", "平静", "中性")
+
+
+def _rb_cluster(m) -> str:
+    """右脑记忆归到脑图哪个簇。0 LLM，只看已有字段。"""
+    if str(getattr(m, "memory_class", "")) == "response_experience":
+        return "experiences"                      # 回复经验：怎么跟这个人说话
+    if any(w in (m.content or "") for w in _PREF_WORDS):
+        return "preference"                       # 口味、习惯、忌口
+    emo = (getattr(m, "metadata", None) or {}).get("emotion", "")
+    return "emotion" if emo not in _CALM else "experiences"
+
+
 def memory_snapshot(limit: int = 48) -> dict:
     """库里已有的记忆，供前端在打开页面时把脑图先铺满。
 
@@ -395,7 +411,7 @@ def memory_snapshot(limit: int = 48) -> dict:
         print(f"[web] 左脑快照读取失败：{e}", flush=True)
     try:
         for m in vm._o._right._rb_repo().list_all(uid)[:limit]:
-            right.append({"text": m.content, "kind": str(getattr(m.memory_class, "value", m.memory_class))})
+            right.append({"text": m.content, "cluster": _rb_cluster(m)})
     except Exception as e:
         print(f"[web] 右脑快照读取失败：{e}", flush=True)
     return {"left": left, "right": right}

@@ -109,6 +109,30 @@ class OpenAIAdditiveExtractorConfig:
 # （值不同），但都和 "User's favorite restaurant" 很像，这样旧值必进比较窗口
 # （benchmark 上 UPDATE 漏判的主因就是旧值挤不进 top-k）。抽取本来就要调一次
 # LLM，多一个字段零成本。
+_VOICE_ADDENDUM = """
+
+# VOICE CONTEXT: what is NOT worth remembering
+
+These transcripts come from live speech, so much of what is said is about the
+conversation itself rather than about the user. Do NOT extract:
+- Audibility and connection checks from either side ("can you hear me?", "能听到吗",
+  "在吗"), and the replies confirming audibility.
+- Identity probes that carry no new information ("do you know who I am?",
+  "你记得我叫什么吗"). If the user actually states their name, extract the name —
+  but never the question itself.
+- Remarks about the exchange rather than the user's life ("why aren't you replying",
+  "别打断我", "你回复得好快", "在跑吗").
+- Fragments the ASR clearly garbled: isolated syllables, filler, or text with no
+  recoverable meaning ("lolo", "嗯那个", "呃", "清华分对").
+- Anything whose only content is that something was said or asked. Never write a
+  memory of the form "User asked X" or "Assistant said X" unless X itself is a fact
+  about the user's world.
+
+The test: would this still be useful to know a week from now, in a different
+conversation? If not, do not extract it. Extracting nothing from a turn is a valid
+and common outcome — an empty result is better than a worthless memory.
+"""
+
 _ATTRIBUTE_ADDENDUM = """
 
 # ADDITIONAL FIELD: attribute
@@ -129,7 +153,7 @@ class OpenAIMem0V3AdditiveExtractor:
 
     def __init__(self, config: OpenAIAdditiveExtractorConfig | None = None) -> None:
         self._cfg = config or OpenAIAdditiveExtractorConfig()
-        self._system = load_additive_system_prompt() + _ATTRIBUTE_ADDENDUM
+        self._system = load_additive_system_prompt() + _ATTRIBUTE_ADDENDUM + _VOICE_ADDENDUM
 
     def extract(
         self,

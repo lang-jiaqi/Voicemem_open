@@ -893,14 +893,26 @@ window.brainClear = function(){ for(const n of N) n.act = 0; };
 /* ---- 运行时生长：实时对话时往脑图新增节点 + 连线（映射关系）----
    window.brainAdd(side, kind, label) 在对应半球加一个节点并连到 user 节点，
    返回 id；带淡入 + 短暂高亮。R_BY_KIND 控制不同类型的点大小。 */
+const _clusterCount = {};      // 每个簇已经撒了几个点，决定下一个点在螺旋上的位置
 const R_BY_KIND = { entity:2.6, know:2.6, person:2.6, emotion:5.4, exper:5.0, prefer:5.2 };
 function _nowT(){ return (performance.now()-t0)/1000; }
 window.brainAdd = function(side, kind, label, slot){
   // slot 给定且脑图里有该 SlotV2 簇标签 → 新节点撒在那个槽的簇附近（按槽分）
   const li0 = slot!=null ? LABEL_BY_W[String(slot).toLowerCase()] : undefined;
   let bx, by;
-  if(li0!=null){ bx = N[li0].bx + (Math.random()-0.5)*0.10; by = N[li0].by + (Math.random()-0.5)*0.14; }
+  if(li0!=null){
+    // 向日葵螺旋撒点：同一簇里第 n 个点放在黄金角 n*137.5°、半径 ∝ √n 处。
+    // 原来是在小方框里随机抖动，点一多必然抱团（还会重叠成一坨）；螺旋能保证
+    // 疏密均匀，而且是确定的——同一批记忆每次打开位置一致，不会跳来跳去。
+    const n = (_clusterCount[li0] = (_clusterCount[li0]||0) + 1) - 1;
+    const ang = n * 2.399963;                      // 黄金角
+    const rad = 0.030 + 0.026 * Math.sqrt(n);      // 半径随点数增长
+    bx = N[li0].bx + Math.cos(ang) * rad;
+    by = N[li0].by + Math.sin(ang) * rad * 1.35;   // 竖向拉开一点，脑图是扁的
+  }
   else { bx = side==='R' ? 0.60+Math.random()*0.28 : 0.14+Math.random()*0.28; by = 0.20+Math.random()*0.62; }
+  bx = Math.max(0.06, Math.min(0.94, bx));         // 别飘出脑图外
+  by = Math.max(0.06, Math.min(0.94, by));
   const n = {
     bx, by, side, sx:0, sy:0, k:kind, r:R_BY_KIND[kind]||3.2, w:label||'', bw:0, bh:0,
     ph:Math.random()*6.28, ph2:Math.random()*6.28,
@@ -1031,9 +1043,16 @@ window.brainAdd = function(side, kind, label, slot){
     railAdd(slot, text);
   }
   function growRight(kind, text){
+    growRightIn(RIGHT_CLUSTER[kind] || 'experiences', text, kind);
+  }
+  // 按簇名直接放。后端已经把右脑记忆归好簇了（见 run.py 的 _rb_cluster），
+  // 前端不用再从 memory_class 猜——右脑只有 heartnote / response_experience
+  // 两个 class，猜不出 emotion / preference 的区别。
+  const KIND_OF_CLUSTER = { emotion:'emotion', preference:'prefer', experiences:'exper' };
+  function growRightIn(cluster, text, kind){
     const key = 'R|'+text; if(seen.has(key) || addedCount>=MAX_NODES) return;
-    const cluster = RIGHT_CLUSTER[kind] || 'experiences';
-    seen.set(key, window.brainAdd('R', kind, text, cluster)); addedCount++;
+    seen.set(key, window.brainAdd('R', kind || KIND_OF_CLUSTER[cluster] || 'exper', text, cluster));
+    addedCount++;
     railAdd(cluster, text);
   }
   function onMemoryHits(m){
@@ -1284,7 +1303,7 @@ window.brainAdd = function(side, kind, label, slot){
       if(!r.ok) return;
       const m = await r.json();
       for(const e of (m.left||[]))  growLeft(e.text, e.slot);
-      for(const e of (m.right||[])) growRight(SRC_KIND[e.kind]||'exper', e.text);
+      for(const e of (m.right||[])) growRightIn(e.cluster||'experiences', e.text);
       console.log('[seed] 已有记忆 left=',(m.left||[]).length,'right=',(m.right||[]).length);
     }catch(e){ console.warn('[seed] 读取已有记忆失败', e); }
   })();
