@@ -3,7 +3,8 @@
 #
 #   models/
 #     vad/        silero_vad.onnx                                  判「说完了」
-#     asr/        sherpa-onnx-streaming-zipformer-bilingual-zh-en… 回退流式 ASR
+#     asr/        funasr-paraformer-zh-streaming                   流式 ASR（默认，中文更准）
+#                 sherpa-onnx-streaming-zipformer-bilingual-zh-en… 流式 ASR（回退，纯 onnx 不依赖 torch）
 #     speaker/    3dspeaker_speech_eres2net_base_sv_zh-cn…onnx     声纹
 #     embedding/  intfloat/multilingual-e5-small                   记忆向量 + slot 分类（共用一份）
 #     scene/      MIT/ast-finetuned-audioset-10-10-0.4593          声学场景
@@ -71,7 +72,10 @@ dest = sys.argv[1]
 # onnx 各种量化变体 / openvino，整仓拉是 4.2G，只取需要的约 1.4G——下载、以及
 # 之后传到发布仓库都省一大截。
 SKIP = ["*.bin", "onnx/*", "openvino/*", "*.tflite", "*.h5", "*.msgpack", "coreml/*"]
-for kind, repo, skip in [("embedding", "intfloat/multilingual-e5-small", SKIP),
+for kind, repo, skip in [# 默认流式 ASR。不带它的话 funasr 会在用户说第一句话时才现下 848M
+                         ("asr/funasr-paraformer-zh-streaming",
+                          "funasr/paraformer-zh-streaming", ["example/*", "fig/*"]),
+                         ("embedding", "intfloat/multilingual-e5-small", SKIP),
                          ("scene",     "MIT/ast-finetuned-audioset-10-10-0.4593", SKIP),
                          # SenseVoice 的权重就是 model.pt，不能按 *.bin 那套排除
                          ("emotion",   "FunAudioLLM/SenseVoiceSmall", ["*.onnx", "*.tflite"])]:
