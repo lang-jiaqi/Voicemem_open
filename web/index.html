@@ -1105,28 +1105,29 @@ window.brainAdd = function(side, kind, label, slot){
   // 分析节点复用 startMic 建好的 micCtx —— 一个 source 可以同时连多个节点，
   // 为可视化再开一个 AudioContext 等于多一份音频线程开销。
   const ORB = {
-    strands: 3, linesPerStrand: 9, points: 150,
-    // baseRadius 0.20 是按 liveAmp 反推的：满电平时最大半径 ~121px，
-    // 加上柔光模糊仍在画布半宽 132 内。调大 liveAmp 就要同步调小它，否则峰值会被切。
-    spacingFrac: 0.05, baseRadius: 0.20,
-    idleAmp: 0.30, liveAmp: 1.35,      // 形变幅度：静止时 / 满电平时
+    strands: 3, linesPerStrand: 9, points: 150, spacingFrac: 0.05,
+    baseRadius: 0.34,                  // 静音时的半径（画布短边的比例）
+    shrink: 0.45,                      // 电平越高基础半径收得越小——丝带向外张开，
+                                       // 圆心那圈跟着收进来，峰值才不会顶出画布
+    idleAmp: 0.05, liveAmp: 1.05,      // 形变幅度：静音时近乎正圆（起伏 6%），满电平 138%
     idleSpeed: 0.10, liveSpeed: 0.55,
-    rotSpeed: 0.09, lineWidth: 1.0,
-    haloBlur: 5, haloAlpha: 0.28, midBlur: 2, midAlpha: 0.35,
-    dark: [14, 22, 90], light: [120, 205, 255],
+    rotSpeed: 0.09, lineWidth: 1.1,
+    liveSquish: 0.88,                  // 满电平时的纵向压扁；静音恒为 1（正圆）
+    haloBlur: 5, haloAlpha: 0.38, midBlur: 2, midAlpha: 0.46,
+    dark: [45, 115, 245], light: [170, 235, 255],   // 内圈鲜蓝 → 外圈亮青
   };
   let orbAnalyser=null, orbLevel=0, orbPhase=0;
   const orbData=new Uint8Array(128);
   const orbGlow=document.createElement('canvas');
 
-  function orbPoint(theta, t, si, R, amp){
+  function orbPoint(theta, t, si, R, amp, squish){
     const ph=(si/ORB.strands)*Math.PI*2;
     const r=R*(1 + amp*(0.40*Math.sin(3*theta+ph+t*1.0)
                       + 0.24*Math.sin(5*theta-ph*2+t*0.6)
                       + 0.16*Math.sin(2*theta+ph*1.5-t*1.4)));
     const wob=0.09*R*amp*Math.sin(4*theta-t*1.8+ph);
     return { x: r*Math.cos(theta) + wob*Math.cos(theta+Math.PI/2),
-             y: r*Math.sin(theta)*0.86 + wob*Math.sin(theta+Math.PI/2) };
+             y: r*Math.sin(theta)*squish + wob*Math.sin(theta+Math.PI/2) };
   }
 
   function startOrb(){
@@ -1150,9 +1151,10 @@ window.brainAdd = function(side, kind, label, slot){
       orbLevel += (lvl-orbLevel) * (lvl>orbLevel ? 0.35 : 0.06);
 
       const amp=ORB.idleAmp + (ORB.liveAmp-ORB.idleAmp)*orbLevel;
+      const squish=1 - (1-ORB.liveSquish)*orbLevel;   // 静音正圆，说话时略压扁成花瓣
       orbPhase += dt*(ORB.idleSpeed + (ORB.liveSpeed-ORB.idleSpeed)*orbLevel);
       const rot=now*0.001*ORB.rotSpeed;
-      const R=Math.min(W,H)*ORB.baseRadius;
+      const R=Math.min(W,H)*ORB.baseRadius*(1-ORB.shrink*orbLevel);
 
       // ① 线条画到离屏画布（清晰、不带模糊）
       g.clearRect(0,0,W,H); g.save(); g.translate(W/2,H/2); g.rotate(rot);
@@ -1169,10 +1171,10 @@ window.brainAdd = function(side, kind, label, slot){
           g.beginPath();
           for(let i=0;i<=ORB.points;i++){
             const th=(i/ORB.points)*Math.PI*2;
-            const pt=orbPoint(th, orbPhase, si, Rk, amp);
+            const pt=orbPoint(th, orbPhase, si, Rk, amp, squish);
             i===0 ? g.moveTo(pt.x,pt.y) : g.lineTo(pt.x,pt.y);
           }
-          g.globalAlpha=0.32+0.68*edge; g.stroke();
+          g.globalAlpha=0.50+0.50*edge; g.stroke();
         }
       }
       g.globalAlpha=1; g.restore();
@@ -1181,8 +1183,8 @@ window.brainAdd = function(side, kind, label, slot){
       c.clearRect(0,0,W,H);
       c.save(); c.translate(W/2,H/2);
       const bg=c.createRadialGradient(0,0,0,0,0,R*2.1);
-      bg.addColorStop(0,   `rgba(40,90,220,${0.20+0.25*orbLevel})`);
-      bg.addColorStop(0.5, `rgba(20,40,120,${0.08+0.10*orbLevel})`);
+      bg.addColorStop(0,   `rgba(60,130,255,${0.26+0.30*orbLevel})`);
+      bg.addColorStop(0.5, `rgba(30,70,190,${0.12+0.14*orbLevel})`);
       bg.addColorStop(1,   'rgba(0,0,0,0)');
       c.fillStyle=bg; c.beginPath(); c.arc(0,0,R*2.1,0,Math.PI*2); c.fill();
       c.restore();
