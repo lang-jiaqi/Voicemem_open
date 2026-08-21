@@ -190,7 +190,7 @@ python examples/04_voice_agent_own_model.py
 即复现同一个 adapter：
 
 ```bash
-pip install trl peft datasets accelerate bitsandbytes
+pip install -e ".[finetune]"
 
 python finetune/train.py --data data/train.jsonl
 ```
