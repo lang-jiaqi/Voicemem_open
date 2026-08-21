@@ -39,9 +39,8 @@ python examples/03_voice_agent.py
 python examples/04_voice_agent_own_model.py
 ```
 
-To watch what the stream does internally (partials, each speculation stage),
-see [`example.py`](../example.py) at the repo root — the long-form version of `03`
-that also accepts a wav file.
+Pass `on_partial=` to `vm.stream()` to watch the transcript as it forms — both
+examples already do, printing each partial in place.
 
 ## 3. Swapping internal components
 
