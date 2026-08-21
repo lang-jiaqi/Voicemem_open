@@ -5,10 +5,8 @@ LLM/TTS/Realtime 流、以及 FastAPI + WebSocket 接线。run.py 只管把这�
 投机预取的对话流程。
 """
 import os
-from functools import lru_cache
 from pathlib import Path
 
-import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -22,8 +20,6 @@ from voicemem.leftbrain.local_e5_embedder import LocalE5Embedder, shared_e5  # n
 
 HERE = Path(__file__).resolve().parent
 CHAT_MODEL = os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o")
-TTS_MODEL = os.environ.get("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
-TTS_BACKEND = os.environ.get("TTS_BACKEND", "openai")   # openai(api) | local(离线小模型)
 RT_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime")
 client = AsyncOpenAI()
 
@@ -33,6 +29,10 @@ client = AsyncOpenAI()
 # 原来这里还有一份 make_vad()——自从 demo 改成复用 vm.stream() 之后就没人调了，
 # VAD 现在是核心的可注入能力（VoiceMem(vad=...) / config 的 vad 段），已删。
 from voicemem.utils.audio.stream_io import resample  # noqa: E402,F401
+
+# TTS（在线/离线两个后端 + 分句）已提进核心，见 voicemem/tts.py；这里 re-export
+# 保持 `utils.tts_stream(...)` 的既有调用点不变。
+from voicemem.tts import TTS_BACKEND, TTS_MODEL, cut_point, tts_stream  # noqa: E402,F401
 
 
 # ── 回复模型也在一处配：统一 config 的 reply 段（run.py 从 CONFIG["reply"] 传入）──
@@ -56,57 +56,6 @@ async def llm_stream(text, ctx, reply=None):
         d = chunk.choices[0].delta.content
         if d:
             yield d
-
-
-async def tts_stream(text, reply=None):
-    """可切换 TTS：默认走 OpenAI api；reply.tts.provider==local（或 TTS_BACKEND=local）
-    走离线本地小模型。两条都吐 24kHz PCM16 流，前端一视同仁播放。
-
-    **按样本边界切块**：http 流是按网络包切的，实测 69 块里 62 块是奇数字节，而
-    PCM16 一个样本占 2 字节——前端 ``new Int16Array(buf)`` 撞上奇数 byteLength 直接
-    抛 RangeError，被 catch 吞掉，那一整块音频就没了。九成块被丢，听感就是滋滋声。
-    这里把跨块的半个样本留到下一块，保证吐出去的每块都是完整样本。
-    """
-    provider, cfg = _reply_seg(reply, "tts")
-    backend_name = provider or TTS_BACKEND          # 对齐现有 TTS_BACKEND 语义
-    backend = _local_tts_stream if backend_name == "local" else _openai_tts_stream
-    tail = b""
-    async for chunk in backend(text, cfg.get("model")):
-        buf = tail + chunk
-        cut = len(buf) & ~1                         # 向下取到偶数
-        tail = buf[cut:]
-        if cut:
-            yield buf[:cut]
-    if tail:
-        yield tail + b"\x00"                        # 收尾那半个样本补齐
-
-
-async def _openai_tts_stream(text, model=None):
-    """在线 api：OpenAI TTS（gpt-4o-mini-tts），response_format=pcm 就是 24k PCM16。"""
-    async with client.audio.speech.with_streaming_response.create(
-            model=model or TTS_MODEL, voice="alloy", input=text, response_format="pcm") as resp:
-        async for chunk in resp.iter_bytes():
-            yield chunk
-
-
-@lru_cache(maxsize=1)
-def _piper_voice():
-    """离线小模型：默认 piper（纯离线 onnx，中英皆可）。装：pip install piper-tts；
-    VOICEMEM_TTS_MODEL 指向 voice 的 .onnx。想换 kokoro / edge-tts 等，只改这个函数
-    和下面 _local_tts_stream 的取样即可。piper api 随版本，对照其文档。"""
-    from piper import PiperVoice
-    return PiperVoice.load(os.environ["VOICEMEM_TTS_MODEL"])
-
-
-async def _local_tts_stream(text, model=None):
-    """离线本地 TTS：合成 → 重采样到 24k → 分块 yield，接口和在线版完全一致。
-    （离线 voice 由 VOICEMEM_TTS_MODEL 指定；model 形参仅为和在线版对齐签名。）"""
-    v = _piper_voice()
-    sr = getattr(getattr(v, "config", None), "sample_rate", 22050)
-    for raw in v.synthesize_stream_raw(text):          # 同步生成器，int16 bytes @ sr
-        f = np.frombuffer(raw, np.int16).astype(np.float32) / 32768.0
-        out = resample(f, src=sr, dst=24000)           # 统一到前端/OpenAI 的 24k
-        yield (np.clip(out, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
 
 
 def realtime_connect(reply=None):

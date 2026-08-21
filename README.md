@@ -1,7 +1,7 @@
 # VoiceMem
 
 <p align="center">
-  <img src="assets/Voicemem_logo.png" alt="VoiceMem Logo" width="100%">
+  <img src="assets/Voicemem_logo.webp" alt="VoiceMem Logo" width="100%">
 </p>
 
 <p align="center">
@@ -39,7 +39,7 @@
 * **简单实用：** 单轮查询约 300 token；架构全部解耦，全部组件（含底层记忆引擎）都可更换。
 
 <p align="center">
-  <img src="assets/teaser.png" alt="VoiceMem 概览" width="100%">
+  <img src="assets/teaser.webp" alt="VoiceMem Logo" width="100%">
 </p>
 
 ## 🎬 Demo
@@ -195,7 +195,7 @@ VoiceMem 不把所有记忆放进同一个检索数据库，而是将记忆拆�
 * **右脑**通过独立节点和跨实体节点管理人格、情绪和关系信息。
 
 <p align="center">
-  <img src="./docs/images/stages.png" alt="VoiceMem 处理流程" width="90%">
+  <img src="./docs/images/stages.webp" alt="VoiceMem Logo" width="90%">
 </p>
 
 整个流程都是**流式**的。
@@ -268,9 +268,8 @@ python finetune/train.py --data data/train.jsonl
 
 评测流程完全开源，并且可以复现。
 
-<p align="center">
-  <img src="./assets/evaluation.png" alt="VoiceMem 评测结果" width="100%">
-</p>
+## Benchmarking: Fully open-source and alls reproducible.
+<img src="./assets/evaluation.webp" alt="VoiceMem Logo" width="100%">
 
 ### 运行评测
 

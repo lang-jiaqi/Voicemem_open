@@ -20,8 +20,8 @@
     async def my_fn(text, memory_context) -> str          # 协程
     async def my_fn(text, memory_context): yield delta    # 异步生成器（流式）
 
-**TTS 不在这里。** 语音合成仍只在 web demo 里（``web/utils.py`` 的 ``tts_stream``），
-核心的回复层只产出文本。
+**TTS 不在这里。** 回复层只产出文本；要出声用 ``voicemem/tts.py``——
+``speak_stream(vm.reply_stream(turn))`` 边生成边合成，见 examples/03_voice_agent.py。
 """
 from __future__ import annotations
 

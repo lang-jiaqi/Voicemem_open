@@ -20,11 +20,9 @@ python finetune/train.py --data data/train.jsonl
 | `eval.py` | 拿训好的 adapter 在数据上跑一遍，逐条打印 `ref` / `pred` |
 | `dataset.py` | 读 JSONL 并**逐条校验**格式，不合规直接报第几条第几句 |
 | `utils.py` | 读清单里的超参、四种 system prompt、warmup 换算 |
-| `data/sample.jsonl` | 5 条样例，四个 category 都有 |
+| `data/sample.jsonl` | 5 条样例 |
 
 ## 数据格式
-
-一行一条对话，`messages` 是 OpenAI 那套写法：
 
 ```json
 {
@@ -36,15 +34,6 @@ python finetune/train.py --data data/train.jsonl
   "meta": {"lang": "zh", "category": "knowledge", "session_id": "s_0001", "turn": 1}
 }
 ```
-
-`dataset.py` 会强制这几条，任何一条不满足都会中断并指出是第几条：
-
-- 第一句必须是 `system`，最后一句必须是 `assistant`，中间严格 user/assistant 交替
-- 历史最多 6 轮（`MAX_HISTORY`）
-- `meta.lang` ∈ `zh` / `en`，`meta.category` ∈ `knowledge` / `emotion` / `persona` / `casual`
-- **system 必须和 `category`+`lang` 对得上**——四种 prompt 写死在 `utils.py` 的 `SYSTEM` 里，
-  `knowledge`/`emotion`/`persona` 共用「带记忆」那版，`casual` 用「闲聊」那版
-
 记忆块拼在**最后一轮的 user 里**，历史轮不带记忆。只有最后一句 assistant 算 loss
 （`loss_scale="last_round"`），历史轮不算。
 
