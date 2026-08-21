@@ -758,6 +758,25 @@ function frame(now){
   }
   if('letterSpacing' in ctx) ctx.letterSpacing = '0px';
 
+  /* 被检索命中的点：外圈亮一道白光。
+     跟 hover 那个旋转虚线环是两回事——那个表示"鼠标指着"，这个表示
+     "这一轮检索取到了它"，所以一直亮着到下一次检索，并且轻微呼吸。 */
+  ctx.globalCompositeOperation = 'lighter';
+  for(const n of N){
+    if(!n.hit) continue;
+    const pulse = 0.78 + 0.22*Math.sin(t*2.2 + n.ph);
+    const base = n.r*2.0*S + 4.5*Math.max(.7,S);
+    ctx.beginPath(); ctx.arc(n.x, n.y, base + 3.2*Math.max(.7,S), 0, 6.2832);
+    ctx.strokeStyle = 'rgba(170,215,255,'+(0.26*n.hit*pulse).toFixed(3)+')';
+    ctx.lineWidth = Math.max(3.0, 4.6*S);
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(n.x, n.y, base, 0, 6.2832);
+    ctx.strokeStyle = 'rgba(255,255,255,'+(0.9*n.hit*pulse).toFixed(3)+')';
+    ctx.lineWidth = Math.max(1.1, 1.5*S);
+    ctx.stroke();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+
   /* selection reticle */
   for(const n of N){
     if(n.h<.02) continue;
@@ -955,6 +974,12 @@ window.brainActivate = function(opts){
 window.brainClear = function(){ for(const n of N) n.act = 0; };
 // 脑图藏起来时容器尺寸是 0；从 Chat 切回 Memory Space 后要重算一次。
 window.brainResize = resize;
+// 这一轮检索命中了哪些节点 → 它们的外圈亮起来，到下一次检索为止。
+window.brainHighlight = function(ids){
+  for(const n of N) n.hit = 0;
+  for(const id of ids) if(N[id]) N[id].hit = 1;
+};
+
 
 // 两条记忆讲同一个人/同一件事 → 连一条线。由前端在铺记忆时按实体交集调用。
 window.brainLink = function(idA, idB){
@@ -1009,7 +1034,7 @@ window.brainAdd = function(side, kind, label, slot){
     bx, by, side, sx:0, sy:0, k:kind, r:R_BY_KIND[kind]||3.2, w:label||'', bw:0, bh:0,
     ph:Math.random()*6.28, ph2:Math.random()*6.28,
     sp:0.28+Math.random()*0.42, ax:0.55+Math.random()*0.9, ay:0.55+Math.random()*0.9,
-    x:0,y:0,h:0,p:0,f:1,iv:0, id:N.length, act:0.95, dl:_nowT()
+    x:0,y:0,h:0,p:0,f:1,iv:0, id:N.length, act:0.95, hit:0, dl:_nowT()
   };
   N.push(n); ADJ.push([]); NB.push([]);
   // 连线（映射关系）：左脑有槽 → 连到该槽的簇标签（归属）；否则连到 user（跨脑）
@@ -1283,6 +1308,10 @@ window.brainAdd = function(side, kind, label, slot){
     // 这一次检索的跨脑联合：一道光从左脑命中的事实射向右脑命中的画像
     if (leftIds.length > 0 && rightIds.length > 0 && window.brainBeam) {
       window.brainBeam(leftIds, rightIds);
+    }
+    // 这一轮取到的点，外圈亮起来
+    if (window.brainHighlight) {
+      window.brainHighlight(leftIds.concat(rightIds));
     }
   }
 
