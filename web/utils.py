@@ -66,7 +66,7 @@ def realtime_connect(reply=None):
 
 
 # ── SearchResult → 脑图 html 认识的 memory_hits 负载 ──────────────────────────
-def hits_payload(result, has_audio=None):
+def hits_payload(result, has_audio=None, cluster_of=None):
     """has_audio(memory_id) -> bool：这条记忆有没有存档的原音频。
     有的话前端给一个播放按钮——"我上周五听的那首歌"能被原样放回来。"""
     return {
@@ -74,7 +74,9 @@ def hits_payload(result, has_audio=None):
                         "memory_id": h.memory_id,
                         "has_audio": bool(has_audio and has_audio(h.memory_id))}
                        for h in result.hits],
-        "right_brain_hits": [{"content": h.content, "source": h.source, "priority": h.priority}
+        # cluster 由 run.py 注入（同一套规则，前端不再自己从 source 猜）
+        "right_brain_hits": [{"content": h.content, "source": h.source, "priority": h.priority,
+                              "cluster": cluster_of(h.content, h.source) if cluster_of else ""}
                              for h in (getattr(result, "rb_hits", None) or [])],
         "current_scene": getattr(result, "current_scene", None) or None,
         "related_summaries": getattr(result, "related_summaries", None) or {},

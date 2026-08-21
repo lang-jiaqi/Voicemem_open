@@ -1304,7 +1304,8 @@ window.brainAdd = function(side, kind, label, slot){
       if (id !== undefined) leftIds.push(id);
     }
     for (var j = 0; j < hitsR.length; j++) {
-      var rid = growRight(SRC_KIND[hitsR[j].source] || 'exper', hitsR[j].content);
+      var cluster = hitsR[j].cluster || 'experiences';
+      var rid = growRightIn(cluster, hitsR[j].content);
       if (rid !== undefined) rightIds.push(rid);
     }
     // 这一次检索的跨脑联合：一道光从左脑命中的事实射向右脑命中的画像

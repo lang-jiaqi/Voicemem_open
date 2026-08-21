@@ -156,7 +156,7 @@ async def voicemem_llm_tts(pending, send, send_audio):
     ~1.2s，加上生成那几秒，用户看着字干等）。
     """
     await send({"type": "user_transcript", "text": pending.text})
-    await send({"type": "memory_hits", **utils.hits_payload(pending.result, has_audio=audio_of)})
+    await send({"type": "memory_hits", **utils.hits_payload(pending.result, has_audio=audio_of, cluster_of=hit_cluster)})
     await send({"type": "answer_start"})
 
     queue: asyncio.Queue = asyncio.Queue()
@@ -233,7 +233,7 @@ async def start_realtime_turn(pending, conn, send):
     response.done 会被下一轮读到，当成自己说完了。
     """
     await send({"type": "user_transcript", "text": pending.text})
-    await send({"type": "memory_hits", **utils.hits_payload(pending.result, has_audio=audio_of)})
+    await send({"type": "memory_hits", **utils.hits_payload(pending.result, has_audio=audio_of, cluster_of=hit_cluster)})
     if pending.spoken:
         await conn.input_audio_buffer.commit()
     else:
@@ -464,20 +464,32 @@ async def realtime_session(sock):
         await _no_realtime(sock, e)
 
 
-#: 偏好类的词面信号——右脑只有 heartnote / response_experience 两个 class，
-#: 光靠 class 分不出脑图上的 emotion / preference / experiences 三簇。
-_PREF_WORDS = ("喜欢", "爱好", "偏好", "习惯", "规律", "不吃", "过敏", "素食", "讨厌", "不喜欢", "放松")
+#: 右脑内容 → 脑图三个簇。
+#:
+#: 为什么看内容前缀而不是 source：source 只有 heartnote / response_experience /
+#: profile 三种，而 profile 是个容器——"情绪：…""喜好与厌恶：…""应对方式：…"
+#: 全挂在它下面。只看 source 的话这些一律归到 preference，于是说"我很伤心"，
+#: 射线也全打在 preference 上，emotion 那一簇永远是空的。
+_CLUSTER_PREFIX = (
+    ("emotion",     ("情绪", "情感记录", "内心OS", "感受")),
+    ("preference",  ("喜好与厌恶", "偏好", "思维模式", "饮食")),
+    ("experiences", ("应对方式", "表达风格", "避免重复", "印象", "沟通")),
+)
 _CALM = ("", "平静", "中性")
 
 
-def _rb_cluster(m) -> str:
-    """右脑记忆归到脑图哪个簇。0 LLM，只看已有字段。"""
-    if str(getattr(m, "memory_class", "")) == "response_experience":
-        return "experiences"                      # 回复经验：怎么跟这个人说话
-    if any(w in (m.content or "") for w in _PREF_WORDS):
-        return "preference"                       # 口味、习惯、忌口
-    emo = (getattr(m, "metadata", None) or {}).get("emotion", "")
-    return "emotion" if emo not in _CALM else "experiences"
+def rb_cluster(content: str, memory_class: str = "", emotion: str = "") -> str:
+    """一条右脑记忆归到脑图哪个簇。0 LLM，只看已有字段。"""
+    text = content or ""
+    for cluster, words in _CLUSTER_PREFIX:
+        for w in words:
+            if w in text[:14]:                 # 前缀里出现才算，正文里提到不算
+                return cluster
+    if str(memory_class) == "response_experience":
+        return "experiences"
+    if emotion not in _CALM:
+        return "emotion"
+    return "experiences"
 
 
 def audio_of(memory_id: str) -> str:
@@ -491,6 +503,19 @@ def audio_of(memory_id: str) -> str:
     except Exception as e:
         print(f"[web] 查存档音频失败：{e}", flush=True)
         return ""
+
+
+def hit_cluster(content: str, source: str) -> str:
+    """给检索命中用：只有 content 和 source，没有 metadata。"""
+    return rb_cluster(content, source, "")
+
+
+def _rb_cluster(m) -> str:
+    """给快照用：从 RightBrainMemory 对象取字段。"""
+    meta = getattr(m, "metadata", None) or {}
+    return rb_cluster(getattr(m, "content", ""),
+                      str(getattr(m, "memory_class", "")),
+                      meta.get("emotion", ""))
 
 
 def memory_snapshot(limit: int = 48) -> dict:
