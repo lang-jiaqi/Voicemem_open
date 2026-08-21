@@ -2,53 +2,67 @@
   <img src="assets/Voicemem_logo.png" alt="VoiceMem Logo" width="100%">
 </p>
 
+<p align="center">
+  <strong>中文</strong> | <a href="README_en.md">English</a>
+</p>
 
 <p align="center">
-  <a href="https://arxiv.org/abs/2605.19833">Technical Report 📖</a> /
-  <a href="https://huggingface.co/datasets/zhifeixie/Voices-in-the-Wild-2M">Voices-in-the-wild-2M 🤗</a> /
-  <a href="https://huggingface.co/zhifeixie/Mega-ASR">Mega-ASR Weights 🤗</a> /
+  <a href="https://arxiv.org/abs/2605.19833">技术报告 📖</a> /
+  <a href="https://huggingface.co/datasets/zhifeixie/Voices-in-the-Wild-2M">Voices-in-the-Wild-2M 🤗</a> /
+  <a href="https://huggingface.co/zhifeixie/Mega-ASR">Mega-ASR 权重 🤗</a> /
   <a href="https://github.com/xzf-thu/Voices-in-the-Wild-Bench">Voices-in-the-Wild-Bench 🏆</a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/xzf-thu/Mega-ASR/raw/main/assets/wechat.jpg"><img src="https://img.shields.io/badge/WeChat-Join%20Group-07C160?logo=wechat&logoColor=white" alt="WeChat"></a> <a href="https://xzf-thu.github.io/Mega-ASR/"><img src="https://img.shields.io/badge/Project-Page-blue" alt="Project Page"></a> <a href="https://x.com/XieZhifei14110"><img src="https://img.shields.io/badge/X-@XieZhifei14110-black?logo=x&logoColor=white" alt="X"></a>
+  <a href="https://github.com/xzf-thu/Mega-ASR/raw/main/assets/wechat.jpg">
+    <img src="https://img.shields.io/badge/WeChat-Join%20Group-07C160?logo=wechat&logoColor=white" alt="WeChat">
+  </a>
+  <a href="https://xzf-thu.github.io/Mega-ASR/">
+    <img src="https://img.shields.io/badge/Project-Page-blue" alt="Project Page">
+  </a>
+  <a href="https://x.com/XieZhifei14110">
+    <img src="https://img.shields.io/badge/X-@XieZhifei14110-black?logo=x&logoColor=white" alt="X">
+  </a>
 </p>
 
 ---
 
-我们带来 **VoiceMem**，为语音模型增加最后一个组件：灵魂，让它真正越来越懂你。VoiceMem 建立在
-「流式双脑」架构之上，提供精准、有情感、懂人格、低延迟且最便宜的记忆服务。快速理解 VoiceMem：
+我们带来 **VoiceMem**，为语音模型增加最后一个组件：灵魂，让它真正越来越懂你。VoiceMem 建立在<strong>「流式双脑」</strong>架构之上，提供**精准、有情感、懂人格、低延迟且最便宜的记忆服务**。本仓库将<strong>「永久保持全部开源」</strong>。
 
-- **左脑：** 直接管理信息，在 top-3 限制下维持 Mem0 的满载性能。
-- **右脑：** 用长短期情绪归因管理「情商」，含交叉节点、与左脑信息联合维护。
-- **低延迟：** 通过压缩信息、分层存储、流式查询（0–500ms 投机预取），几乎不增加延迟。
-- **简单实用：** 单轮查询约 300 token；架构全部解耦，全部组件（含底层记忆引擎）都可更换。
+快速理解 VoiceMem：
+
+* **左脑：** 直接管理信息，在 Top-3 限制下维持 Mem0 的满载性能。
+* **右脑：** 用长短期情绪归因管理「情商」，含交叉节点、与左脑信息联合维护。
+* **低延迟：** 通过压缩信息、分层存储、流式查询（0–500 ms 投机预取），几乎不增加延迟。
+* **简单实用：** 单轮查询约 300 token；架构全部解耦，全部组件（含底层记忆引擎）都可更换。
 
 <p align="center">
-  <img src="assets/teaser.png" alt="VoiceMem Logo" width="100%">
+  <img src="assets/teaser.png" alt="VoiceMem 概览" width="100%">
 </p>
 
-## Demo
-NOTE: need to unmute first.
+## 🎬 Demo
+
+> **注意：** 播放前需要先取消静音。
+
 <div align="center">
   <video
-    src="https://private-user-images.githubusercontent.com/201621992/637588589-34d46638-20db-4943-a88b-b3826c16f156.mp4?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3ODcwNjIwNzIsIm5iZiI6MTc4NzA2MTc3MiwicGF0aCI6Ii8yMDE2MjE5OTIvNjM3NTg4NTg5LTM0ZDQ2NjM4LTIwZGItNDk0My1hODhiLWIzODI2YzE2ZjE1Ni5tcDQ_WC1BbXotQWxnb3JpdGhtPUFXUzQtSE1BQy1TSEEyNTYmWC1BbXotQ3JlZGVudGlhbD1BS0lBVkNPRFlMU0E1M1BRSzRaQSUyRjIwMjYwODE4JTJGdXMtZWFzdC0xJTJGczMlMkZhd3M0X3JlcXVlc3QmWC1BbXotRGF0ZT0yMDI2MDgxOFQxNDAyNTJaJlgtQW16LUV4cGlyZXM9MzAwJlgtQW16LVNpZ25hdHVyZT00ZTdkY2IxYzhiYjk2MzAzMGYxN2MyYjE1YTNjODk1MTMxNWY4ZmRlYzZlNTQzOWM4YzE5YjQ3M2M3MjE0OWQ0JlgtQW16LVNpZ25lZEhlYWRlcnM9aG9zdCZyZXNwb25zZS1jb250ZW50LXR5cGU9dmlkZW8lMkZtcDQifQ.GxzWfZKRHMcGRQe4Kc__YKqJrtNSnUcPIFPnPv7n2zQ"
+    src="https://private-user-images.githubusercontent.com/201621992/637588589-34d46638-20db-4943-a88b-b3826c16f156.mp4"
     width="1000"
     controls>
   </video>
 </div>
 
-## Overview
+## 📚 目录
 
-* **[Quick Start](#quick-start)** 
-* **[Architecture](#architecture)**
-* **[Models](#models)**
-* **[Demo](#demo)**
-* **[Released Model](#released-model)**
-* **[Acknowledgements](#acknowledgements)**
-* **[License](#license)**
+* [🚀 快速开始](#-快速开始)
+* [🧠 VoiceMem 双脑流式架构](#-voicemem基于流式双脑架构的记忆系统)
+* [🤖 VoiceMem 官方记忆模型](#-voicemem-模型系列)
+* [🔌 自定义模型](#-连接自己的语音模型)
+* [📊 评测代码](#-评测)
+* [ 致谢](#-致谢)
+* [ 许可证](#-许可证)
 
-## Quick Start
+## 🚀 快速开始
 
 ### 安装
 
@@ -56,138 +70,186 @@ NOTE: need to unmute first.
 git clone https://github.com/lang-jiaqi/Voicemem_open.git
 cd Voicemem_open
 
-## Memory system installation
+# 安装记忆系统
 pip install voicemem
 
-## Use VoiceMem Model Families:
+# 使用 VoiceMem 模型系列
 pip install "voicemem[slm]"
 ```
 
-### Required Model Download
+### 下载所需模型
 
 ```bash
 pip install -U huggingface_hub
+
 hf download zhifeixie/VoiceMem_Default_Models_Env --local-dir ./models
 ```
 
+### 基础用法 <a id="interfaces"></a>
 
-### Basic usage <a id="interfaces"></a>
+#### 作为离线记忆引擎运行
 
-**Run as an Offline Memory Engine**
 ```python
 from voicemem import VoiceMem
 
-vm = VoiceMem(mode="normal",
-              openai_key="api_xxx",
-              top_k = 5)          
+vm = VoiceMem(
+    mode="normal",
+    openai_key="api_xxx",
+    top_k=5,
+)
 
-# 存：音频文件（内部跑ASR/声纹/场景/情绪感知/Embedding抽取）
-vm.ingest(audio="input.wav") # 我是素食主义者，对坚果过敏
-result = vm.search("我的饮食禁忌是什么？")  
+# 存：音频文件
+# 内部跑 ASR / 声纹 / 场景 / 情绪感知 / Embedding 抽取
+vm.ingest(audio="input.wav")  # 我是素食主义者，对坚果过敏。
+
+result = vm.search("我的饮食禁忌是什么？")
+
 print(result.result_leftbrain, result.result_rightbrain)
 
 
 # 存：左脑信息文本（无情感）
-
-vm = VoiceMem(mode="leftbrain_only",
-              openai_key="api_xxx",
-              top_k = 5)             
+vm = VoiceMem(
+    mode="leftbrain_only",
+    openai_key="api_xxx",
+    top_k=5,
+)
 
 vm.ingest("我是素食主义者，对坚果过敏。")
-result = vm.search("我的饮食禁忌是什么？")     
+
+result = vm.search("我的饮食禁忌是什么？")
 ```
 
-**Run VoiceMem in streaming (Just treat it as VAD)**
+#### 以流式方式运行 VoiceMem
+
+可以把 VoiceMem 的流式接口看作一个持续处理音频的 VAD 接口。
 
 ```python
 import asyncio
 from pprint import pprint
+
 import numpy as np
 import soundfile as sf
-
 
 
 async def main():
     audio, sr = sf.read("speech.wav", dtype="float32")
     pcm = (np.clip(audio, -1, 1) * 32767).astype(np.int16)
+
     stream = vm.stream(
         src_rate=sr,
         vad_threshold=0.5,
         on_partial=lambda t: print(f"\r[partial] {t}", end="", flush=True),
     )
+
     step = int(sr * .032)
 
     for i in range(0, len(pcm), step):
         st = await stream.feed(pcm[i:i + step].tobytes())
         print(f"\n[state] {st.state}")
 
-        FIELDS = ["result_leftbrain", "result_rightbrain", "speaker_id", "speaker_voiceprint", "emotion", "transcript", "entity", "schema", "text_embedding"]
+        FIELDS = [
+            "result_leftbrain",
+            "result_rightbrain",
+            "speaker_id",
+            "speaker_voiceprint",
+            "emotion",
+            "transcript",
+            "entity",
+            "schema",
+            "text_embedding",
+        ]
+
         if st.state == "turn_over":
             pprint({key: getattr(st, key) for key in FIELDS})
+
 
 asyncio.run(main())
 ```
 
-### Interactive demo with VoiceMem
+### VoiceMem 交互式演示
 
 ```bash
-python web/run.py    # http://localhost:8787
+python web/run.py
 ```
 
-## VoiceMem: Memory with streaming dual-brain archetecture
+然后访问：
 
-**VoiceMem** is a memory system built for real-time voice agents. Instead of treating memory as a single retrieval database, VoiceMem separates it into two complementary brains:
+```text
+http://localhost:8787
+```
 
-<p align="center">
-  <img src="./docs/images/fig-architecture.webp" alt="VoiceMem Logo" width="80%">
-</p>
+## 🧠 VoiceMem：基于流式双脑架构的记忆系统
 
+**VoiceMem** 是一个面向实时语音智能体的记忆系统。
 
-
-- **Left Brain** organizes factual memory with schemas and entities for precise retrieval.
-- **Right Brain** models personality, emotion, and relationships through independent and cross-entity memory nodes.
-
-<p align="center">
-  <img src="./docs/images/stages.png" alt="VoiceMem Logo" width="90%">
-</p>
-
-
-The entire pipeline is **streaming**. While the user is still speaking, VoiceMem continuously segments audio, transcribes speech, extracts memory, and writes structured information into the graph. At query time, VoiceMem **routes first, ranks second, and injects only the Top-K memories** into the model context.
-
-### Features
-
-- 🎯 **Accurate** — Get **91.2% on LoCoMo**, vs. **61.68% for Mem0**, with only **Top-5** memories.
-
-- ❤️ **Emotional & Personal** — Remember **who the user is and how they feel**, not just what they said. Reach **69.44% on PersonaMem**.
-
-- 🎧 **Multimodal** — Remember **speech, speakers, sound events, multi-speaker conversations, and music** from real-world audio.
-
-- ⚡ **Fast** — Respond in **134 ms**, vs. **1,440 ms for Mem0**, with streaming retrieval inside the voice turn.
-
-- 💰 **Cheap** — Use only **302 memory tokens**, vs. **6,956 for Mem0** and **1,899 for EverMemOS**.
-
-
-### VoiceMem Model Families
-
-We build **ChatMem-400K** through a three-stage pipeline: **memory-world construction, SLM-validated online on-policy distillation (OPD), and human refinement**. The same pipeline produces **ChatMem-Bench** for evaluation. Our models including **Qwen2.5-Omni, Qwen3-Omni, and Step-Audio2-Mini** learn to proactively invoke VoiceMem when memory is useful.
+VoiceMem 不把所有记忆放进同一个检索数据库，而是将记忆拆分成两个互相配合的部分：
 
 <p align="center">
-  <img src="./docs/images/fig-opd.webp" alt="VoiceMem Logo" width="90%">
+  <img src="./docs/images/fig-architecture.webp" alt="VoiceMem 系统架构" width="80%">
 </p>
 
-## Voicechatting with Voiem Model Families
+* **左脑**通过 Schema 和 Entity 组织事实记忆，用于更加准确地检索信息。
+* **右脑**通过独立节点和跨实体节点管理人格、情绪和关系信息。
 
-用微调过的模型做实时语音对话——麦克风 → voicemem 边听边预取记忆 → 模型带着记忆回答：
+<p align="center">
+  <img src="./docs/images/stages.png" alt="VoiceMem 处理流程" width="90%">
+</p>
+
+整个流程都是**流式**的。
+
+在用户仍然说话时，VoiceMem 会持续完成音频分段、语音转写、记忆提取，并把结构化信息写入记忆图中。
+
+查询时，VoiceMem 会**先路由，再排序，最后只把 Top-K 条记忆注入模型上下文**，从而在保留相关信息的同时控制上下文长度。
+
+### 主要特性
+
+* 🎯 **精准** — 在 **LoCoMo 上达到 91.2%**，Mem0 为 **61.68%**，并且只需要 **Top-5** 条记忆。
+* ❤️ **有情感、懂人格** — 不只记住**用户说过什么**，还会记住**用户是谁、用户有什么感受**。在 **PersonaMem 上达到 69.44%**。
+* 🎧 **多模态** — 可以从真实世界音频中记住**语音、说话人、声音事件、多人对话和音乐**。
+* ⚡ **低延迟** — 响应时间为 **134 ms**，Mem0 为 **1,440 ms**，并支持在语音轮次内部进行流式检索。
+* 💰 **低 Token 消耗** — 每次只使用 **302 个记忆 token**，Mem0 为 **6,956**，EverMemOS 为 **1,899**。
+
+---
+
+## 🤖 VoiceMem 模型系列
+
+我们通过三阶段 OPD 训练流程构建 **ChatMem-400K**：
+
+1. **Memory-world construction**
+2. **SLM-validated online on-policy distillation（OPD）**
+3. **Human refinement**
+
+同一套流程在人工编辑后形成 **ChatMem-Bench**，评测语音模型是否能够在长期沉淀中形成对用户的理解。
+
+VoiceMem 家族开源模型包括 **Qwen2.5-Omni、Qwen3-Omni 和 Step-Audio2-Mini**。这些模型可以在对话时接受并理解 VoiceMem 提供的记忆信息。
+
+<p align="center">
+  <img src="./docs/images/fig-opd.webp" alt="VoiceMem OPD 流程" width="90%">
+</p>
+
+## 🔌 连接自己的语音模型
+
+你可以将 VoiceMem 接入自己的微调模型，用于实时语音对话。
+
+整体流程如下：
+
+**麦克风 → VoiceMem 监听语音并提前检索相关记忆 → 你的模型读取这些记忆并生成回答**
 
 ```bash
 pip install funasr sounddevice transformers peft torch
-export OPENAI_API_KEY=sk-...          # 只用于写入侧的事实抽取，检索全本地
+
+export OPENAI_API_KEY=sk-...
+# 仅在写入记忆时用于事实信息提取。
+# 记忆检索完全在本地运行。
 
 python examples/04_voice_agent_own_model.py
 ```
 
-训一个自己的 adapter。默认超参就是已发布 `checkpoint-3318` 那次用的，照默认跑
-即复现同一个 adapter：
+### 训练自己的 Adapter
+
+默认训练配置与发布的 `checkpoint-3318` 使用的配置一致。
+
+使用默认参数运行下面的命令，可以复现相同的 Adapter：
 
 ```bash
 pip install -e ".[finetune]"
@@ -195,51 +257,80 @@ pip install -e ".[finetune]"
 python finetune/train.py --data data/train.jsonl
 ```
 
-数据格式、显存要求、换基座怎么调，见 **[finetune/README.md](finetune/README.md)**。
+训练数据格式、GPU 显存要求，以及如何更换基础模型，请参阅 **[finetune/README.md](finetune/README.md)**。
 
+## 📊 评测
 
-## Benchmarking: Fully open-source and alls reproducible.
-<img src="./assets/evaluation.png" alt="VoiceMem Logo" width="100%">
+评测流程完全开源，并且可以复现。
 
-### Evaluation
+<p align="center">
+  <img src="./assets/evaluation.png" alt="VoiceMem 评测结果" width="100%">
+</p>
 
-一条命令跑完一个 benchmark：
+### 运行评测
+
+只需要一条命令即可运行 Benchmark：
 
 ```bash
 export OPENAI_API_KEY=sk-...
 
-# 先用仓库自带的小样例验证环境（2 段对话 5 个问题）
-python evaluation/run.py --dataset locomo --data evaluation/examples/locomo_sample.json
+# 建议先运行仓库中自带的小型示例，
+# 确认环境和配置没有问题。
+# 2 个对话，5 个问题。
+python evaluation/run.py \
+    --dataset locomo \
+    --data evaluation/examples/locomo_sample.json
 
-# 换成真数据集
-python evaluation/run.py --dataset locomo --data data/locomo.json
+# 然后运行完整数据集。
+python evaluation/run.py \
+    --dataset locomo \
+    --data data/locomo.json
 ```
+
+示例结果：
 
 ```text
-locomo  10 段对话 · 152 题
-得分 139/152  =  91.4%
-   multi_hop                88.2%
-   temporal                 85.7%
-   single_hop               95.1%
-检索中位数 12ms · 记忆中位数 298 tokens
+LoCoMo: 10 conversations · 152 questions
+
+Score: 139/152 = 91.4%
+
+  multi_hop     88.2%
+  temporal      85.7%
+  single_hop    95.1%
+
+Median retrieval latency: 12 ms
+Median retrieved memory: 298 tokens
 ```
 
-跑之前先加 `--inspect`：不花钱、不调模型，只把数据集解析结果打出来确认字段读对了。
+在运行完整评测之前，可以加入 `--inspect`，检查数据集是否被正确解析。
 
-评测只把**检索到的记忆**交给答题模型，不给原始对话——给了原文就成了阅读理解，
-测不出记忆系统。协议细节和「怎么加一个新 benchmark」（一个文件、两个函数）见
-**[evaluation/README.md](evaluation/README.md)**。
+这个模式不会调用模型，因此也不会产生 API 费用：
 
+```bash
+python evaluation/run.py \
+    --dataset locomo \
+    --data data/locomo.json \
+    --inspect
+```
 
+评测过程中，回答模型**只会收到检索得到的记忆**，不会收到原始对话历史。
 
+如果直接把完整对话交给模型，Benchmark 测试的就会变成模型的阅读理解能力，而不是记忆系统本身的能力。
 
-## Acknowledgements
+完整评测流程，以及添加新 Benchmark 的方法，请参阅 **[evaluation/README.md](evaluation/README.md)**。添加一个新的 Benchmark 只需要增加一个文件并实现两个函数。
 
-衷心感谢这些出色的开源项目：[mem0](https://github.com/mem0ai/mem0)（底层向量记忆引擎）、
-[FunASR](https://github.com/modelscope/FunASR)（流式 ASR paraformer-zh-streaming）、[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)（Silero VAD / 3D-Speaker 声纹 / 回退流式 ASR）、
-[intfloat/multilingual-e5](https://huggingface.co/intfloat/multilingual-e5-small)（本地 embedding 与 slot 分类），
-以及 OpenAI（chat / TTS / Realtime）。
+##  致谢
 
-## License
+我们感谢以下的优秀开源项目之上：
+* [mem0](https://github.com/mem0ai/mem0) — 向量记忆引擎
+* [FunASR](https://github.com/modelscope/FunASR) — 基于 `paraformer-zh-streaming` 的流式 ASR
+* [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) — Silero VAD、3D-Speaker 说话人验证，以及备用流式 ASR
+* [intfloat/multilingual-e5](https://huggingface.co/intfloat/multilingual-e5-small) — 本地 Embedding 和 Slot 分类
 
-本项目以 **Apache License 2.0** 开源 — 见 [LICENSE](LICENSE)。用 VoiceMem 尽情构建 🎉
+VoiceMem 同时使用 OpenAI API 提供 Chat、TTS 和 Realtime 功能。
+
+##  许可证
+
+VoiceMem 基于 **Apache License 2.0** 开源。
+
+详细信息请参阅 [LICENSE](LICENSE)。
