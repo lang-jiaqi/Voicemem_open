@@ -67,11 +67,16 @@ else
 import sys
 from huggingface_hub import snapshot_download
 dest = sys.argv[1]
-for kind, repo in [("embedding", "intfloat/multilingual-e5-small"),
-                   ("scene",     "MIT/ast-finetuned-audioset-10-10-0.4593"),
-                   ("emotion",   "FunAudioLLM/SenseVoiceSmall")]:
+# 只拉真正会被加载的那一份权重。这些仓库同时放了 safetensors / pytorch_model.bin /
+# onnx 各种量化变体 / openvino，整仓拉是 4.2G，只取需要的约 1.4G——下载、以及
+# 之后传到发布仓库都省一大截。
+SKIP = ["*.bin", "onnx/*", "openvino/*", "*.tflite", "*.h5", "*.msgpack", "coreml/*"]
+for kind, repo, skip in [("embedding", "intfloat/multilingual-e5-small", SKIP),
+                         ("scene",     "MIT/ast-finetuned-audioset-10-10-0.4593", SKIP),
+                         # SenseVoice 的权重就是 model.pt，不能按 *.bin 那套排除
+                         ("emotion",   "FunAudioLLM/SenseVoiceSmall", ["*.onnx", "*.tflite"])]:
     print(f"        {kind} ← {repo}")
-    snapshot_download(repo_id=repo, local_dir=f"{dest}/{kind}")
+    snapshot_download(repo_id=repo, local_dir=f"{dest}/{kind}", ignore_patterns=skip)
 PY
 fi
 
