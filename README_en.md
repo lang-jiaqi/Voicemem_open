@@ -129,10 +129,16 @@ The streaming interface continuously processes incoming audio and can be used in
 
 ```python
 import asyncio
+import os
 from pprint import pprint
 
 import numpy as np
 import soundfile as sf
+
+from voicemem import VoiceMem
+
+# Reuses the vm above; building one here so the block runs standalone
+vm = VoiceMem(mode="normal", openai_key=os.environ["OPENAI_API_KEY"], top_k=5)
 
 
 async def main():

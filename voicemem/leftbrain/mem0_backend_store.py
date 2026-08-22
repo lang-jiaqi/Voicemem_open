@@ -339,8 +339,12 @@ class Mem0BackendStore:
         out = []
         for e in entries:
             md = e.get("metadata") or {}
+            # role 也带上：助手自己说过的话原样存在库里（见 add_text 的
+            # attributed_to="assistant"），调用方要能把它们挑出来——比如 web demo
+            # 的脑图只该显示"关于用户的记忆"，把助手的回复也长成节点就不对了。
             out.append({"id": str(e["id"]), "text": str(e.get("memory", "") or ""),
-                        "date": str(md.get("time_start") or e.get("created_at") or "")[:10]})
+                        "date": str(md.get("time_start") or e.get("created_at") or "")[:10],
+                        "role": str(md.get("role") or e.get("role") or "user")})
         return out
 
     def existing_for_extractor(self, user_id: str, *, limit: int = 50) -> list[dict[str, str]]:

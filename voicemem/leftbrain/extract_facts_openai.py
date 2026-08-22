@@ -138,6 +138,19 @@ class OpenAIAdditiveExtractorConfig:
 # （值不同），但都和 "User's favorite restaurant" 很像，这样旧值必进比较窗口
 # （benchmark 上 UPDATE 漏判的主因就是旧值挤不进 top-k）。抽取本来就要调一次
 # LLM，多一个字段零成本。
+_LANGUAGE_RULE = """
+
+# LANGUAGE
+
+Write each memory in the SAME language the user spoke it in. A Chinese utterance
+becomes a Chinese memory, an English one an English memory. Never translate.
+
+Retrieval is embedding-based: a Chinese question and an English memory about the
+same thing are far apart in vector space, so a translated memory quietly becomes
+unfindable. Keep proper nouns and product names as the user said them.
+"""
+
+
 _VOICE_ADDENDUM = """
 
 # VOICE CONTEXT: what is NOT worth remembering
@@ -159,6 +172,10 @@ conversation itself rather than about the user. Do NOT extract:
 - The user's request for this turn. "User wants dinner suggestions", "User asked for
   restaurant recommendations" — wanting something right now is not a lasting fact.
   A standing preference is ("User only drinks pour-over coffee"); a one-off ask is not.
+- Never write "Speaker 0" (or any "Speaker N") into a memory as if it were a name.
+  It means the voice has not been matched to a known person yet. Attribute the fact
+  to "用户" / "the user" when the speaker is clearly the person talking to you, and
+  do not assume they are anyone named elsewhere in the conversation.
 - The assistant's own answer: suggestions it made, options it listed, information it
   looked up. Those are the assistant's output, not facts about the user. Extract from
   an assistant turn only when the user CONFIRMED something about themselves in it.
@@ -171,14 +188,6 @@ The test: would this still be useful to know a week from now, in a different
 conversation? If not, do not extract it. Extracting nothing from a turn is a valid
 and common outcome — an empty result is better than a worthless memory.
 
-# LANGUAGE
-
-Write each memory in the SAME language the user spoke it in. A Chinese utterance
-becomes a Chinese memory, an English one an English memory. Never translate.
-
-Retrieval is embedding-based: a Chinese question and an English memory about the
-same thing are far apart in vector space, so a translated memory quietly becomes
-unfindable. Keep proper nouns and product names as the user said them.
 """
 
 _ATTRIBUTE_ADDENDUM = """
@@ -201,7 +210,7 @@ class OpenAIMem0V3AdditiveExtractor:
 
     def __init__(self, config: OpenAIAdditiveExtractorConfig | None = None) -> None:
         self._cfg = config or OpenAIAdditiveExtractorConfig()
-        self._system = load_additive_system_prompt() + _ATTRIBUTE_ADDENDUM + _VOICE_ADDENDUM
+        self._system = load_additive_system_prompt() + _LANGUAGE_RULE + _ATTRIBUTE_ADDENDUM + _VOICE_ADDENDUM
 
     def extract(
         self,

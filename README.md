@@ -128,10 +128,16 @@ result = vm.search("我的饮食禁忌是什么？")
 
 ```python
 import asyncio
+import os
 from pprint import pprint
 
 import numpy as np
 import soundfile as sf
+
+from voicemem import VoiceMem
+
+# 沿用上面那个 vm；单独跑这段就自己建一个
+vm = VoiceMem(mode="normal", openai_key=os.environ["OPENAI_API_KEY"], top_k=5)
 
 
 async def main():

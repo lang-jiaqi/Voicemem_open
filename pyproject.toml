@@ -31,12 +31,21 @@ dependencies = [
 # Qwen2.5-Omni runtime for multimodal audio attribution.
 # Model weights are resolved separately at runtime and are not bundled in the
 # Python wheel.
+# VoiceMem 模型系列：网关代码 + 音频运行所需的全套依赖。
+# README 的第一个示例就有 ingest(audio=...)，所以这里要把 ASR/声纹/情绪那套
+# 也带上 —— 之前只有 torch/transformers，装完仍然 ModuleNotFoundError: funasr。
 slm = [
     "torch",
     "transformers==4.52.3",
     "accelerate",
     "qwen-omni-utils",
     "soundfile",
+    "scipy",
+    "funasr",             # 流式 ASR
+    "torchaudio",         # funasr 内部 import 它，但自己没声明
+    "modelscope",         # funasr 取模型用
+    "sherpa-onnx",        # VAD + 声纹
+    "sentence-transformers",   # 本地 E5（记忆向量 / slot 分类）
 ]
 
 # Backward-compatible name for existing users of the old extra.
@@ -71,6 +80,7 @@ clap = [
 voiceprint = [
     "sherpa-onnx",
     "funasr",
+    "torchaudio",         # funasr 内部 import 它，但自己没声明
     "modelscope",
 ]
 
@@ -90,6 +100,7 @@ wav = [
 stream = [
     "voicemem[wav]",
     "funasr",
+    "torchaudio",         # funasr 内部 import 它，但自己没声明
     "modelscope",
 ]
 

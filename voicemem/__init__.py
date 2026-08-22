@@ -41,6 +41,11 @@ def _quiet_third_party_logs() -> None:
                  "sentence_transformers", "transformers"):
         logging.getLogger(name).setLevel(logging.WARNING)
 
+    # transformers 有一类提示走的是它自己的 warning 系统，logging 等级管不到
+    # （"Using a slow image processor as use_fast is unset..."）。用它的开关。
+    os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+    os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
+
 
 _quiet_third_party_logs()
 

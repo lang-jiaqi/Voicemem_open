@@ -328,7 +328,11 @@ def voice_input_to_messages(
                 # actual name via the normal entry.name path above.
                 label = "User"
             else:
-                label = f"Unidentified speaker {current_vpid} (voice not yet linked to any known name — do not assume this is the account owner or anyone else named in this conversation)"
+                # 声纹还没绑到名字。标签要满足两点：别被当成人名写进记忆
+                # （"Unidentified speaker is a vegetarian" 就是这么来的），
+                # 也别是一长串英文——那会把整段抽取带成英文，中文提问就检索不到。
+                # 用 "Speaker N" 这种中性代号，附带说明单独给一条 system 提示。
+                label = "Speaker 0"
         content = f"{label}: " + " ".join(current_sentences)
         messages.append({"role": entry.role, "content": content})
 
