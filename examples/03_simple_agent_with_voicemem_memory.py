@@ -331,7 +331,9 @@ async def main():
             print()
 
             if reply:
-                vm.ingest(st.transcript, reply)
+                # agent_reply 是关键字参数：写成 ingest(text, reply) 的话 reply 会
+                # 落到 audio 上，被当成音频文件路径。
+                vm.ingest(st.transcript, agent_reply=reply)
 
     finally:
         audio.close()
