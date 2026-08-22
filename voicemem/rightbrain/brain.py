@@ -122,7 +122,10 @@ def _rb_ctx_to_hits(rb_ctx) -> list["RightBrainHit"]:
             priority *= 0.75
         hits.append(RightBrainHit(
             content=content, source="situation_pattern", priority=priority,
-            metadata={"anchor_score": getattr(m, "anchor_score", 0.0)},
+            # emotion 也带出来。它一直存在这条记忆的 metadata 里，但从没进过 hit——
+            # 调用方（web demo 的情绪标签）拿不到，只能去 content 里抠正则。
+            metadata={"anchor_score": getattr(m, "anchor_score", 0.0),
+                      "emotion": str(meta.get("emotion") or "")},
         ))
     sigs = rb_ctx.current_signals
     now: list[str] = []
@@ -137,6 +140,8 @@ def _rb_ctx_to_hits(rb_ctx) -> list["RightBrainHit"]:
         head = "Current signals: " if en else "当前信号："
         hits.append(RightBrainHit(
             content=head + sep.join(now), source="current_signal", priority=0.95,
+            # 这是**本轮**的情绪（affect_hint），比检索回来的旧记忆上那个更该显示。
+            metadata={"emotion": str(sigs.affect_hint or "")},
         ))
     return hits
 
@@ -279,6 +284,37 @@ def _rb_relation_hits(rb_graph, user_id: str, anchors) -> list["RightBrainHit"]:
                 source="relation", priority=0.85, metadata={"entity_name": ent.name},
             ))
     return hits
+
+
+#: 各来源在 top-N 里最多占几席。没列的不限。
+#:
+#: 为什么要配额：这两类的 priority 都是**查询无关**的常数，谁都竞争不过它们——
+#:   · response_experience 记的是"助手上次怎么答的"（"✓ 有效方式：助手用轻松的
+#:     语气引导用户展开对话"），是给回复层看的内部笔记，不是对用户其人的认识；
+#:   · profile 是每个 slot 的静态描述（``_rb_graph_hits`` 把所有带描述的 slot
+#:     无条件全返回，priority 固定 0.5），**每一轮都是同样那几条**。
+#: 实测这两类合起来能吃掉 top-5 的全部席位，于是右脑对每个问题给的东西都一样：
+#: 回复里读不出"它记得我这件事"，脑图上每次检索射向的也永远是同一批节点。
+#: 真正随问题变的是 situation_pattern（情感记录）和 relation（对某人的印象）——
+#: 得给它们留出位置。
+_SOURCE_QUOTA = {
+    "response_experience": max(0, int(os.environ.get("VOICEMEM_RB_RESPONSE_MAX", "1"))),
+    "profile": max(0, int(os.environ.get("VOICEMEM_RB_PROFILE_MAX", "2"))),
+}
+
+
+def _apply_source_quota(hits: list["RightBrainHit"]) -> list["RightBrainHit"]:
+    """按来源限席。保留已排好的 priority 顺序，超额的往后挪，不丢弃。"""
+    kept, spill, used = [], [], {}
+    for h in hits:
+        src = getattr(h, "source", "")
+        cap = _SOURCE_QUOTA.get(src)
+        if cap is None:
+            kept.append(h)
+            continue
+        used[src] = used.get(src, 0) + 1
+        (kept if used[src] <= cap else spill).append(h)
+    return kept + spill
 
 
 def _render_rb_directive(hits: list["RightBrainHit"]) -> str:
@@ -427,7 +463,7 @@ class RightBrain:
                 _rb_topn = max(1, int(os.environ.get("VOICEMEM_RB_TOPN", "5")))
             except ValueError:
                 _rb_topn = 5
-            rb_hits = collected[:_rb_topn]
+            rb_hits = _apply_source_quota(collected)[:_rb_topn]
             return rb_hits, _render_rb_directive(rb_hits)
         except Exception as e:
             import traceback as _tb

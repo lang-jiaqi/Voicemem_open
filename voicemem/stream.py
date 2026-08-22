@@ -194,8 +194,23 @@ class VoiceStream:
     """
 
     def __init__(self, vm, *, on_partial=None, spec_min_chars=6,
-                 gamble_s=0.2, confirm_s=0.5, src_rate=24000, vad_threshold=None):
+                 gamble_s=0.2, confirm_s=0.5, src_rate=24000, vad_threshold=None,
+                 emotion=None):
         self.vm = vm
+        #: 投机检索时带给 Search 的情绪提示（调用方可随时改写这个属性）。
+        #:
+        #: **右脑没有它就基本是空转的。** 右脑的情感记录几乎全部只挂在「情绪」
+        #: 锚点上（实测一个库里 126 条 heartnote、124 条的锚点是 emotion），
+        #: 不给情绪就一条都匹配不上，右脑只剩每轮都一样的静态 profile——回复里
+        #: 读不出"它记得我这件事"，就是这么来的。实测同一个问题：
+        #:     emotion=None   → 右脑 4 条，全是 profile
+        #:     emotion="难过" → 情感记录 2 条 + 性格观察 1 条 + profile 2 条
+        #:
+        #: 但**本轮**的情绪读不得：``StreamState.emotion`` 是惰性属性，取一次要
+        #: 同步跑整套声学感知（实测 2.1s），投机预取那 0–500ms 的预算根本不够。
+        #: 所以调用方该把**上一轮** ingest 返回的 ``affect`` 写进来——情绪本来就有
+        #: 连续性，代价是 0ms。
+        self.emotion = emotion
         self.on_partial = on_partial
         self.spec_min_chars = spec_min_chars
         self.gamble_s = gamble_s
@@ -237,7 +252,8 @@ class VoiceStream:
 
         def work():
             c = self.vm.classify(text)
-            return self.vm.search(text, slots=c.slots, entities=c.entities)
+            return self.vm.search(text, slots=c.slots, entities=c.entities,
+                                  emotion=self.emotion or None)
 
         result = await asyncio.to_thread(work)
         print(f"[speculate] {text[:24]!r} -> {len(result.hits)} hits  "
