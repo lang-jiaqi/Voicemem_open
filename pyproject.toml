@@ -48,6 +48,8 @@ slm = [
     "sentence-transformers",   # 本地 E5（记忆向量 / slot 分类）
     "fastapi",            # web demo
     "uvicorn",
+    "sounddevice",        # examples 里的语音 agent：麦克风 + 扬声器
+    "pywebrtc-audio",     # 回声消除（外放时能打断）
 ]
 
 # Backward-compatible name for existing users of the old extra.

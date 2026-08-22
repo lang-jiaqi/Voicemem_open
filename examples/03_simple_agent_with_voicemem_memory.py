@@ -1,7 +1,7 @@
 """最简 voicegent：voicemem 流式记忆 → OpenAI → 小 TTS 实时播放，用户一开口就打断。"""
 
 """请先运行
-pip install openai sounddevice scipy pywebrtc-audio kokoro"""
+pip install openai sounddevice scipy"""
 
 
 import asyncio
@@ -29,7 +29,8 @@ BARGE_THRESHOLD = 0.30
 
 OPENAI_MODEL = "gpt-4o-mini"
 
-TTS_VOICE = "zf_xiaoxiao"
+TTS_MODEL = "gpt-4o-mini-tts"
+TTS_VOICE = "alloy"
 TTS_NATIVE_SR = 24000
 TTS_MIN_CHARS = 6              # lower = faster first audio, but more fragmented
 
@@ -153,20 +154,12 @@ class AudioIO:
 # ── persistent Kokoro: load ONCE before "[ready]" ────────────────────
 class TTS:
     def __init__(self, audio: AudioIO):
-        from kokoro import KPipeline
+        from openai import OpenAI
 
         self.audio = audio
         self.text_q = queue.Queue()
         self.closed = False
-
-        # Hide model/download/progress noise.
-        with contextlib.redirect_stdout(io.StringIO()), \
-             contextlib.redirect_stderr(io.StringIO()):
-            self.pipe = KPipeline(lang_code="z")
-
-            # Force lazy weights / voice to load NOW, not on first reply.
-            for _ in self.pipe("你好。", voice=TTS_VOICE):
-                break
+        self.client = OpenAI()
 
         self.worker = threading.Thread(target=self._worker, daemon=True)
         self.worker.start()
@@ -193,15 +186,26 @@ class TTS:
             if self.audio.stop_reply.is_set():
                 continue
 
-            for _, _, wav in self.pipe(text, voice=TTS_VOICE):
-                if self.audio.stop_reply.is_set():
-                    break
-
-                wav = np.asarray(wav, dtype=np.float32)
-
-                # AEC and speaker share exactly the same 16 kHz far-end signal.
-                wav16 = resample_poly(wav, SR, TTS_NATIVE_SR)
-                self.audio.playback.put(wav16)
+            try:
+                # 流式拿 PCM，不等整句合成完 —— 第一块出来就能播。
+                with self.client.audio.speech.with_streaming_response.create(
+                    model=TTS_MODEL, voice=TTS_VOICE, input=text,
+                    response_format="pcm",          # 24kHz 单声道 PCM16
+                ) as resp:
+                    tail = b""
+                    for chunk in resp.iter_bytes(4096):
+                        if self.audio.stop_reply.is_set():
+                            break
+                        buf = tail + chunk
+                        cut = len(buf) & ~1          # PCM16 两字节一个样本，别切一半
+                        tail = buf[cut:]
+                        if not cut:
+                            continue
+                        wav = np.frombuffer(buf[:cut], np.int16).astype(np.float32) / 32768.0
+                        # AEC 和扬声器共用同一路 16k 远端信号
+                        self.audio.playback.put(resample_poly(wav, SR, TTS_NATIVE_SR))
+            except Exception as e:
+                print(f"\n[tts] 合成失败：{type(e).__name__}: {e}", flush=True)
 
 
 # ── LLM token stream -> terminal + short TTS chunks ─────────────────
