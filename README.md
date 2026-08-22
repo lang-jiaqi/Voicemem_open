@@ -86,6 +86,8 @@ pip install "voicemem[slm]"
 pip install -U huggingface_hub
 
 hf download zhifeixie/VoiceMem_Default_Models_Env --local-dir ./models
+
+export VOICEMEM_MODELS_DIR=$PWD/models
 ```
 
 ### 基础用法 <a id="interfaces"></a>
@@ -93,33 +95,40 @@ hf download zhifeixie/VoiceMem_Default_Models_Env --local-dir ./models
 #### 作为离线记忆引擎运行
 
 ```python
+import os
+
 from voicemem import VoiceMem
 
-vm = VoiceMem(
-    mode="normal",
-    openai_key="api_xxx",
-    top_k=5,
-)
+# 只在写入记忆时用于事实抽取。
+KEY = os.environ["OPENAI_API_KEY"]
 
-# 存：音频文件
-# 内部跑 ASR / 声纹 / 场景 / 情绪感知 / Embedding 抽取
-vm.ingest(audio="input.wav")  # 我是素食主义者，对坚果过敏。
+vm = VoiceMem(mode="normal", openai_key=KEY, top_k=5)
 
+# ── 存：几轮对话攒下来的记忆 ──
+# 音频进去会跑 ASR / 声纹 / 场景 / 情绪感知；文本进去只走左脑。
+for text, emotion in [
+    ("我是素食主义者，对坚果过敏，点餐一定要避开这两样。", "平静"),
+    ("我特别讨厌香菜，一点都不能碰。", "厌恶"),
+    ("上次同事推荐的川菜馆全是肉，我只能点个素炒。", "无奈"),
+    ("这学期算法课作业特别难，压力挺大。", "焦虑"),
+    ("周末去海边骑车最放松了。", "愉悦"),
+]:
+    vm.ingest(text, emotion=emotion)
+
+vm.ingest(audio="input.wav")   # 也可以直接喂音频，内部先转写再存
+
+# 右脑的画像是**跨多轮攒出来的**，在会话边界批量归因。
+# 一次对话结束时调一次 flush()，否则 result_rightbrain 会是空的。
+vm.flush()
+
+# ── 查 ──
 result = vm.search("我的饮食禁忌是什么？")
 
-print(result.result_leftbrain, result.result_rightbrain)
+print(result.result_leftbrain)
+# ['用户是素食主义者，并且对坚果过敏，点餐时会避开这两样。', ...]
 
-
-# 存：左脑信息文本（无情感）
-vm = VoiceMem(
-    mode="leftbrain_only",
-    openai_key="api_xxx",
-    top_k=5,
-)
-
-vm.ingest("我是素食主义者，对坚果过敏。")
-
-result = vm.search("我的饮食禁忌是什么？")
+print(result.result_rightbrain)
+# ['喜好与厌恶：用户偏好清淡素食，讨厌香菜。', '应对方式：…', '情绪：…']
 ```
 
 #### 以流式方式运行 VoiceMem

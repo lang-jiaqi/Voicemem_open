@@ -83,6 +83,8 @@ from voicemem.leftbrain.local_memory_store import (
     _DURATION_RE,
     _content_words,
     _lexical_time_bonus,
+    date_overlap_bonus,
+    query_dates,
 )
 
 
@@ -155,7 +157,15 @@ _MEM0_CLIENT_CACHE_LOCK = threading.Lock()
 #: 会以为跑失败了。装了就没有，没装也不该吓人——按 logger 名精确压掉这两条。
 def _quiet_optional_deps() -> None:
     import logging
-    for name in ("mem0.utils.spacy_models", "mem0.vector_stores.qdrant"):
+    import os
+    if os.environ.get("VOICEMEM_VERBOSE", "0") != "0":
+        return
+    # mem0 的可选依赖 warning（缺了照样跑）+ 每存一条就打一行的 "Updating memory
+    # with data=..."；openai SDK 每次请求打一行 "HTTP Request: POST ... 200 OK"。
+    # 这些都是库的 INFO 级噪音，跑一次基础用法能刷出几十行，把真正的结果埋掉。
+    for name in ("mem0", "openai", "httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+    for name in ("mem0.utils.spacy_models", "mem0.vector_stores.qdrant", "mem0.memory.main"):
         logging.getLogger(name).setLevel(logging.ERROR)
 
 
@@ -381,6 +391,7 @@ class Mem0BackendStore:
         q_words = _content_words(q)
         want_dur = bool(_DURATION_Q_RE.search(q))
         want_date = (not want_dur) and bool(_DATE_Q_RE.search(q))
+        q_dates = query_dates(q)     # "下周"展开出来的那几天（见 time_expand）
 
         hits: list[MemorySearchHit] = []
         for e in entries:
@@ -392,6 +403,7 @@ class Mem0BackendStore:
                 continue
             text = str(e.get("memory", ""))
             bonus, time_hit = _lexical_time_bonus(q_words, want_dur, want_date, text)
+            bonus += date_overlap_bonus(q_dates, text)
             metadata = {k: v for k, v in e.items()
                         if k not in ("id", "memory", "score", "hash", "user_id", "created_at", "updated_at")}
             # 事件时间：Ingest 的 observed_at 同时写进了 metadata.time_start 和顶层

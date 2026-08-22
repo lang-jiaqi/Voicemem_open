@@ -678,6 +678,14 @@ class Orchestrator:
         import time
         import concurrent.futures
 
+        # "下周""明天"这种相对时间词在向量里是死的：抽取把日期归一成了绝对日期
+        # （"2026年8月26日（周三）"），而问句里一个绝对日期都没有，够不着。实测
+        # "我下周有什么安排"三条下周日程一条都检索不到，换成"8月26号我要干嘛"
+        # 三条全中——差别只在问法。这里就地把相对时间词展开成日期拼在后面，
+        # 只影响拿去检索的这份文本，不改用户说的话，也不写进记忆。
+        from voicemem.leftbrain.time_expand import expand_relative_dates
+        query = expand_relative_dates(query)
+
         # 情景绑定记忆：调用方没显式传 scene_filter 时，先从 query 文本反推场景意图。
         if scene_filter is None:
             from voicemem.utils.audio.environment.scene_classifier import infer_scene_from_text

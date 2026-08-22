@@ -23,6 +23,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+#: 短于这个秒数的一轮不做声纹识别——见 _detect_speaker 的说明。
+SPEAKER_MIN_S = float(os.environ.get("VOICEMEM_SPEAKER_MIN_S", "2.5"))
+
 
 # ── 结果容器 ───────────────────────────────────────────────────────────────────
 
@@ -443,12 +446,33 @@ class AudioPerceiver:
         return (environment, environment_hint, scene_tag, scene_raw_labels,
                 tune_result, abnormal_hits, detection)
 
+    @staticmethod
+    def _long_enough(_apath) -> bool:
+        """这段音频够不够长到值得认人。读不出时长就放行（不因为一个探测挡住主流程）。"""
+        try:
+            import soundfile as sf
+            return sf.info(str(_apath)).duration >= SPEAKER_MIN_S
+        except Exception:
+            return True
+
     def _detect_speaker(self, speaker, session_id, text, _apath):
         """声纹识别（3D-Speaker ERes2Net）：算声纹向量、识别 person_id、必要时回收
-        候选声纹。返回 (person_id, speaker, stable_voiceprint, vec)。"""
+        候选声纹。返回 (person_id, speaker, stable_voiceprint, vec)。
+
+        太短的音频直接不认人。1-2 秒只够算一个窗口（见 campplus_worker 的
+        VOICEMEM_SPEAKER_WINDOW=3.0），向量噪声很大，分数常落在 candidate 区间
+        （0.40-0.50），而 identify() 的 candidate 分支每次都 fork 一个新 person——
+        同一个人于是被拆成一堆 person_*（实测一个 demo 库里 12 个，其中 7 个
+        obs_count=2）。拆出来之后"说话的还是不是同一个人"就判不准了，web demo
+        的陌生人门会突然翻脸说"我不认识你"。
+        宁可这一轮不知道是谁，也不要往声纹库里塞噪声。门槛见
+        VOICEMEM_SPEAKER_MIN_S（默认 2.5 秒）。
+        """
         person_id: str | None = None
         stable_voiceprint = False
         vec = None
+        if not self._long_enough(_apath):
+            return person_id, speaker, stable_voiceprint, vec
         try:
             vec = self._speaker_encoder().embed(_apath)
             if vec is not None:

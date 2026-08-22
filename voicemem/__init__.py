@@ -18,6 +18,33 @@ ASTEnvironmentDetector 等）依赖 torch / sherpa-onnx，所以采用惰性加�
 
 from __future__ import annotations
 
+# ── 第三方库的 INFO 噪音 ────────────────────────────────────────────────────
+# 跑一次基础用法，openai SDK 会为每次请求打一行 "HTTP Request: POST ... 200 OK"
+# （二三十行），funasr 每转写一块刷一条 rtf 进度条，mem0 每存一条打一行
+# "Updating memory with data=..."。真正的结果被埋在中间，第一次用的人会以为出错。
+#
+# 用 filter 而不是 setLevel：调用方之后再 basicConfig 也盖不掉这里的设置。
+# 想看全部：VOICEMEM_VERBOSE=1。
+def _quiet_third_party_logs() -> None:
+    import logging
+    import os
+
+    if os.environ.get("VOICEMEM_VERBOSE", "0") != "0":
+        return
+
+    os.environ.setdefault("TQDM_DISABLE", "1")          # funasr / transformers 的进度条
+
+    # 用 setLevel 而不是 addFilter：filter 只作用于挂它的那个 logger，不会传给
+    # 子 logger（openai._base_client、funasr.xxx 都是子 logger），实测挡不住。
+    # 等级则是继承的：给 "openai" 设了 WARNING，"openai._base_client" 也照办。
+    for name in ("openai", "httpx", "httpcore", "mem0", "funasr", "modelscope",
+                 "sentence_transformers", "transformers"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
+_quiet_third_party_logs()
+
+
 import importlib
 from typing import TYPE_CHECKING
 

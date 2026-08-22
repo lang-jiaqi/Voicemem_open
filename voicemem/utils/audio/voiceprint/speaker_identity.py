@@ -19,8 +19,11 @@ import re
 # 大写），且后面紧跟标点/"and"/结尾（不能后面还接别的词），排除掉
 # "I'm OK with that" 这种大写但明显不是名字、后面还接着说的情况。
 _LATIN_PATTERNS = [
-    re.compile(r"我(?:的名字)?是\s*([A-Za-z][A-Za-z0-9_-]{0,19})"),
-    re.compile(r"我叫\s*([A-Za-z][A-Za-z0-9_-]{0,19})"),
+    # 收尾必须是标点/空白/结尾。少了这条，"我是Jiaqi的同学"会捕获 "Jiaqi"——
+    # 说话的人明明**不是** Jiaqi，却把 Jiaqi 这个名字绑到了他自己的声纹上。
+    # （中文名字那两条模式本来就有这个约束，拉丁这两条漏了。）
+    re.compile(r"我(?:的名字)?是\s*([A-Za-z][A-Za-z0-9_-]{0,19})(?=[，,。.!！？?、\s]|$)"),
+    re.compile(r"我叫\s*([A-Za-z][A-Za-z0-9_-]{0,19})(?=[，,。.!！？?、\s]|$)"),
     re.compile(r"\b(?i:my name is)\s+([A-Z][A-Za-z0-9_-]{0,19})(?=[,.!?]|\s+and\b|$)"),
     re.compile(r"\b(?i:i'?m)\s+([A-Z][A-Za-z0-9_-]{0,19})(?=[,.!?]|\s+and\b|$)"),
     re.compile(r"\b(?i:i am)\s+([A-Z][A-Za-z0-9_-]{0,19})(?=[,.!?]|\s+and\b|$)"),
@@ -35,6 +38,11 @@ _CJK_PATTERNS = [
 
 # 常见误触发——捕获到的不是名字而是状态/疑问词
 _STOPWORDS = {"不是", "谁啊", "什么", "怎么", "真的", "觉得", "认为", "这样", "那个"}
+
+# 疑问词。"我叫什么名字？"问的是"你还记得我吗"，却被当成自我介绍，把名字绑成
+# "什么名字"——真在库里发生过（voiceprint_registry.json 里那条 name="什么名字"）。
+# 逐个列举穷举不完（什么名字/啥名字/什么来着…），直接看捕获到的名字里含不含疑问词。
+_QUESTION_CHARS = "什谁哪啥吗呢么"
 
 # ``我是`` 既可用于自我介绍，也常被用来表达状态（例如“我是担心”）。中文
 # ASR 不一定提供可靠的词性信息，因此宁可不自动绑定，也不能把情绪/动作永久
@@ -62,6 +70,8 @@ def parse_self_identification(text: str) -> str | None:
         "我是annie，最近工作很累" → "annie"
         "我叫小明"                → "小明"
         "我是不是应该走了"        → None
+        "我叫什么名字？"          → None（问句，不是自我介绍）
+        "我是Jiaqi的同学"        → None（说话的不是 Jiaqi）
     """
     for pattern in _LATIN_PATTERNS + _CJK_PATTERNS:
         m = pattern.search(text)
@@ -72,6 +82,7 @@ def parse_self_identification(text: str) -> str | None:
                 and name not in _STOPWORDS
                 and name not in _CJK_NON_NAMES
                 and name.casefold() not in _LATIN_NON_NAMES
+                and not any(c in _QUESTION_CHARS for c in name)
             ):
                 return name
     return None

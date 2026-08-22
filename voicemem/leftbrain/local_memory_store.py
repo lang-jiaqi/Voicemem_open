@@ -81,6 +81,32 @@ _STOPWORDS = frozenset(
 
 _LEX_WEIGHT = 0.15   # 词面全中时加的分（余弦本身量级约 0.2~0.6）
 _TIME_WEIGHT = 0.10  # 问题类型命中时额外加的分
+_DATE_MATCH_WEIGHT = 0.12  # 问句展开出来的日期，跟记忆正文里的日期对上时加的分
+
+#: 中文日期字面，如 "2026年8月26日" / "8月26日"。抽取归一后的事实就是这个写法。
+_CJK_DATE_RE = re.compile(r"(?:(?:19|20)\d{2}年)?\d{1,2}月\d{1,2}日")
+
+
+def query_dates(query: str) -> frozenset[str]:
+    """问句里出现的中文日期字面。
+
+    多数问句本身没有日期——是 ``time_expand.expand_relative_dates()`` 把"下周"
+    展开成那七天拼上去的。取出来给 ``date_overlap_bonus`` 做精确比对。
+    """
+    return frozenset(_CJK_DATE_RE.findall(query or ""))
+
+
+def date_overlap_bonus(q_dates: frozenset[str], mem_text: str) -> float:
+    """记忆正文里的日期，在不在问句涉及的那几天里。
+
+    展开出来的日期只进了向量，而余弦对"这条日期在不在范围内"分辨力很弱：实测
+    "我下周有什么安排"三条下周日程只排上来两条，被日期不在下周、语义却更近的
+    条目（面试 8/22、咖啡厅 8/20）挤掉了。这里补一次精确字面比对——加的是
+    "在范围内"这个硬事实，不是相似度。
+    """
+    if not q_dates:
+        return 0.0
+    return _DATE_MATCH_WEIGHT if any(d in mem_text for d in q_dates) else 0.0
 
 
 def time_question_kind(query: str) -> str | None:

@@ -92,7 +92,30 @@ class FunASRStreamingASR:
     LOCAL_DIR = "funasr-paraformer-zh-streaming"
 
     def __init__(self, model: str | None = None, device: str | None = None) -> None:
+        import logging as _logging
+        import os as _os
+
+        # `import funasr` 这一行本身就会把 **root logger** 从 WARNING 拉到 INFO 并挂
+        # 一个 handler（实测：import 前 WARNING/0 handlers，import 后 INFO/1）。
+        # 后果不只是它自己刷屏——之后 openai/httpx 的 INFO 也全冒出来，一次基础用法
+        # 能刷几十行 "HTTP Request: POST ... 200 OK"，真正的结果被埋在中间。
+        # 记下 import 前的状态，import 完原样恢复。VOICEMEM_VERBOSE=1 保留原样。
+        _quiet = _os.environ.get("VOICEMEM_VERBOSE", "0") == "0"
+        _root = _logging.getLogger()
+        _lvl, _handlers = _root.level, list(_root.handlers)
+
         from funasr import AutoModel          # 惰性：只有真用流式 ASR 才拉 funasr
+
+        if _quiet:
+            _os.environ.setdefault("TQDM_DISABLE", "1")   # 每转写一块刷一条 rtf 进度条
+            _root.setLevel(_lvl)
+            for _h in list(_root.handlers):
+                if _h not in _handlers:
+                    _root.removeHandler(_h)
+        # funasr 的 AutoModel 里有一句 logging.basicConfig(level=log_level)，默认
+        # INFO —— 它设的是 **root**，于是 openai/httpx 那些库的 INFO 也跟着全冒出来
+        # （"HTTP Request: POST ... 200 OK" 刷几十行）。在 voicemem/__init__ 里给
+        # 各个 logger 设等级挡不住这个，因为它改的是 root。直接把参数传进去。
         if model is None:
             # 有离线包就用本地，没有就交给 funasr 按模型名自己下（848M，会卡在
             # 用户说的第一句上——所以离线包里带着它，别人拉下来开箱即用）。
@@ -100,7 +123,8 @@ class FunASRStreamingASR:
             local = models_dir() / "asr" / self.LOCAL_DIR
             model = str(local) if (local / "config.yaml").exists() else "paraformer-zh-streaming"
         self.model = AutoModel(model=model, device=device or pick_device(),
-                               disable_update=True)
+                               disable_update=True,
+                               log_level="ERROR" if _quiet else "INFO")
         self.reset()
 
     def _run(self, samples, is_final: bool) -> str:

@@ -93,11 +93,16 @@ hf download zhifeixie/VoiceMem_Default_Models_Env --local-dir ./models
 #### Run as an Offline Memory Engine
 
 ```python
+import os
+
 from voicemem import VoiceMem
+
+# Only used for fact extraction on the write path; retrieval stays local.
+KEY = os.environ["OPENAI_API_KEY"]
 
 vm = VoiceMem(
     mode="normal",
-    openai_key="api_xxx",
+    openai_key=KEY,
     top_k=5,
 )
 
@@ -114,7 +119,7 @@ print(result.result_leftbrain, result.result_rightbrain)
 # Store factual text directly without emotional information.
 vm = VoiceMem(
     mode="leftbrain_only",
-    openai_key="api_xxx",
+    openai_key=KEY,
     top_k=5,
 )
 
