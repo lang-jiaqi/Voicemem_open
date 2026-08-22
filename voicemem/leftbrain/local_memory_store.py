@@ -60,13 +60,24 @@ _DURATION_RE = re.compile(
 _DATE_RE = re.compile(
     r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+(?:19|20)\d{2}\b"
     r"|\b(?:19|20)\d{2}-\d{2}-\d{2}\b"
-    r"|\b(?:last|next)\s+(?:year|month|week)\b",
+    r"|\b(?:last|next)\s+(?:year|month|week)\b"
+    # 中文日期。抽取归一后的事实全是"2026年8月29日（周六）"这种写法，只认英文的话
+    # memory_ids_with_time_expr() 在中文库上永远返回空集，时间扩候选等于没开。
+    r"|(?:(?:19|20)\d{2}年)?\d{1,2}月\d{1,2}[日号]",
     re.I,
 )
 _DURATION_Q_RE = re.compile(
     r"\bhow\s+long\b|\bhow\s+many\s+(?:year|month|week|day|hour)s?\b|多久|多长时间", re.I
 )
-_DATE_Q_RE = re.compile(r"\bwhen\b|\bwhat\s+(?:date|day|time)\b|哪天|什么时候", re.I)
+_DATE_Q_RE = re.compile(
+    r"\bwhen\b|\bwhat\s+(?:date|day|time)\b|哪天|什么时候"
+    # 中文相对时间词。"我下周有什么安排"以前判不出是时间问题，于是
+    # _widen_for_time_question 不触发——日程一旦被槽位过滤掉（约饭归 relationships，
+    # 问的却是 schedule）就再也捞不回来，实测三条下周日程只剩两条。
+    r"|今天|明天|后天|昨天|前天|这周|本周|下周|下星期|下个星期|上周|上个星期"
+    r"|接下来|这几天|安排|日程|行程",
+    re.I,
+)
 
 # 问句里没有区分度的高频词，参与词面匹配只会制造噪声
 _STOPWORDS = frozenset(
