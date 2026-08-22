@@ -48,8 +48,10 @@ slm = [
     "sentence-transformers",   # 本地 E5（记忆向量 / slot 分类）
     "fastapi",            # web demo
     "uvicorn",
+    "pydantic",           # web/utils.py 顶层就 import 了（fastapi 带得进来，但别靠它）
     "sounddevice",        # examples 里的语音 agent：麦克风 + 扬声器
     "pywebrtc-audio",     # 回声消除（外放时能打断）
+    "websockets>=14",     # 接 realtime 语音模型（examples/05）
 ]
 
 # Backward-compatible name for existing users of the old extra.
@@ -59,6 +61,13 @@ omni = [
 
 audio = [
     "soundfile",
+]
+
+# 本地 TTS 后端。默认走 OpenAI TTS，这两个只在 TTS_BACKEND=local 时才用得上，
+# 所以不塞进 slm —— voxcpm 是 2B 模型，装一次好几个 G。
+tts_local = [
+    "piper-tts",
+    "voxcpm",
 ]
 
 # finetune/ 那套训练脚本。torch 按自己的平台/CUDA 版本单独装。

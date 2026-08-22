@@ -178,6 +178,8 @@ asyncio.run(main())
 
 ### Interactive Demo with VoiceMem
 
+The demo lives in the repo (the pip package ships the library only) — clone it and run from the repo root.
+
 ```bash
 python web/run.py
 ```

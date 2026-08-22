@@ -177,6 +177,8 @@ asyncio.run(main())
 
 ### VoiceMem 交互式演示
 
+演示代码在仓库里（pip 装的包只有库本身），先确认已经克隆并进入仓库目录。
+
 ```bash
 python web/run.py
 ```
