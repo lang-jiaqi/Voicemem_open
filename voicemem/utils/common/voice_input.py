@@ -283,6 +283,17 @@ def emotion_to_affect(emotion: str) -> str | None:
 
 # ── 核心适配器 ───────────────────────────────────────────────────────────────
 
+def _looks_like_voiceprint_id(vpid: str) -> bool:
+    """这个 id 是系统生成的声纹编号，还是调用方传进来的人名？
+
+    声纹编号形如 person_86fed148 / utt_9f2a / spk_3，人名没有这种前缀。
+    分不清的话人名会被当成"身份不明"，记忆主语被改写成"用户"，
+    按名字提问就检索不到了（"Jiaqi 搬到哪个城市了？" vs "用户搬到杭州"）。
+    """
+    v = (vpid or "").lower()
+    return v.startswith(("person_", "utt_", "spk_", "speaker_", "voiceprint_"))
+
+
 def voice_input_to_messages(
     vi: VoiceInput,
     registry: VoiceprintRegistry,
@@ -327,12 +338,16 @@ def voice_input_to_messages(
                 # core.py's text-mode binding) replaces this with their
                 # actual name via the normal entry.name path above.
                 label = "User"
-            else:
-                # 声纹还没绑到名字。标签要满足两点：别被当成人名写进记忆
+            elif _looks_like_voiceprint_id(current_vpid):
+                # 真的是没绑名字的声纹。标签要满足两点：别被当成人名写进记忆
                 # （"Unidentified speaker is a vegetarian" 就是这么来的），
                 # 也别是一长串英文——那会把整段抽取带成英文，中文提问就检索不到。
-                # 用 "Speaker N" 这种中性代号，附带说明单独给一条 system 提示。
+                # 用 "Speaker N" 这种中性代号，说明单独给一条 system 提示。
                 label = "Speaker 0"
+            # 剩下的情况：调用方直接传了人名（评测适配器传 speaker="Jiaqi"，
+            # 多人对话传对方的名字）。registry 里查不到只是因为它从来没注册过，
+            # 不代表身份不明——原样当人名用。改写成"用户"会让按名字提问的检索
+            # 全部落空（"Jiaqi 搬到哪个城市了？" → 记忆里写的是"用户搬到杭州"）。
         content = f"{label}: " + " ".join(current_sentences)
         messages.append({"role": entry.role, "content": content})
 

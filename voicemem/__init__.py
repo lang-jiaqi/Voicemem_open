@@ -43,6 +43,9 @@ def _quiet_third_party_logs() -> None:
 
     # transformers 有一类提示走的是它自己的 warning 系统，logging 等级管不到
     # （"Using a slow image processor as use_fast is unset..."）。用它的开关。
+    # tokenizers 在 fork 之后会刷一段 "The current process just got forked..."
+    # 的告警。我们本来就不靠它的并行（重活在 ASR/embedding 那边），关掉。
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
     os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
 

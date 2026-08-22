@@ -172,10 +172,13 @@ conversation itself rather than about the user. Do NOT extract:
 - The user's request for this turn. "User wants dinner suggestions", "User asked for
   restaurant recommendations" — wanting something right now is not a lasting fact.
   A standing preference is ("User only drinks pour-over coffee"); a one-off ask is not.
-- Never write "Speaker 0" (or any "Speaker N") into a memory as if it were a name.
-  It means the voice has not been matched to a known person yet. Attribute the fact
-  to "用户" / "the user" when the speaker is clearly the person talking to you, and
-  do not assume they are anyone named elsewhere in the conversation.
+- Never write "Speaker 0" (or any "Speaker N") into a memory as if it were a name —
+  it means the voice has not been matched to a known person yet. In that case say
+  "用户" / "the user" instead, and do not assume they are anyone named elsewhere
+  in the conversation.
+  When the message DOES carry a real name ("Jiaqi: 我搬去杭州了"), keep that name as
+  the subject. Rewriting a named speaker to "用户" makes the memory unfindable by
+  questions that use the name ("Jiaqi 搬到哪个城市了？").
 - The assistant's own answer: suggestions it made, options it listed, information it
   looked up. Those are the assistant's output, not facts about the user. Extract from
   an assistant turn only when the user CONFIRMED something about themselves in it.

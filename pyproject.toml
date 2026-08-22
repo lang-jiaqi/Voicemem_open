@@ -46,6 +46,8 @@ slm = [
     "modelscope",         # funasr 取模型用
     "sherpa-onnx",        # VAD + 声纹
     "sentence-transformers",   # 本地 E5（记忆向量 / slot 分类）
+    "fastapi",            # web demo
+    "uvicorn",
 ]
 
 # Backward-compatible name for existing users of the old extra.
