@@ -31,6 +31,16 @@ _E5_NAME = _e5_name()
 @lru_cache(maxsize=1)
 def shared_e5():
     """缓存单份本地 E5（memory embedding + slot 分类共享同一实例，省一份内存）。"""
+    import os as _os
+    # 每次启动都刷一条 "Loading weights: 100%|███| 199/199"（transformers 用 tqdm
+    # 打的）。模型在本地、一瞬间就加载完，这条除了吓人没有信息量。
+    # 想看加载细节就设 VOICEMEM_VERBOSE=1。
+    if _os.environ.get("VOICEMEM_VERBOSE", "0") == "0":
+        try:
+            from transformers.utils import logging as _hf_logging
+            _hf_logging.disable_progress_bar()
+        except Exception:
+            pass
     from sentence_transformers import SentenceTransformer
     return SentenceTransformer(_E5_NAME)
 
@@ -44,7 +54,11 @@ class LocalE5Embedder:
 
     @property
     def dimensions(self):
-        return shared_e5().get_sentence_embedding_dimension()
+        # 新版 sentence-transformers 把它改名成 get_embedding_dimension，旧名还在
+        # 但会打 FutureWarning。两个名字都试，跨版本都不吵。
+        m = shared_e5()
+        fn = getattr(m, "get_embedding_dimension", None) or m.get_sentence_embedding_dimension
+        return fn()
 
     def embed_texts(self, texts):
         if not texts:

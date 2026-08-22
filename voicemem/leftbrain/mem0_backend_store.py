@@ -150,6 +150,30 @@ _MEM0_CLIENT_CACHE: dict[str, Any] = {}
 _MEM0_CLIENT_CACHE_LOCK = threading.Lock()
 
 
+#: mem0 那几个可选依赖没装时会打 warning，但它们缺了照样能跑（spaCy 只影响
+#: 词形还原、fastembed 只影响 BM25 那一路）。第一次用的人看到三行红字夹着结果，
+#: 会以为跑失败了。装了就没有，没装也不该吓人——按 logger 名精确压掉这两条。
+def _quiet_optional_deps() -> None:
+    import logging
+    for name in ("mem0.utils.spacy_models", "mem0.vector_stores.qdrant"):
+        logging.getLogger(name).setLevel(logging.ERROR)
+
+
+#: qdrant-client 的 __del__ 在解释器退出时会踩到 sys.meta_path 已清空，抛一段
+#: ImportError traceback——结果早就打印完了，纯属吓人。进程退出前主动关掉，
+#: 就不会走到那个坏掉的 __del__。
+def _close_on_exit(mem0_instance) -> None:
+    import atexit
+
+    def _close():
+        try:
+            mem0_instance.vector_store.client.close()
+        except Exception:
+            pass
+
+    atexit.register(_close)
+
+
 class Mem0BackendStore:
     """Drop-in replacement for ``LocalMemoryStore`` backed by real ``mem0.Memory``.
 
@@ -172,6 +196,8 @@ class Mem0BackendStore:
             if cached is not None:
                 self._mem0 = cached
                 return
+
+            _quiet_optional_deps()
 
             from mem0 import Memory
             from mem0.configs.base import MemoryConfig
@@ -196,6 +222,7 @@ class Mem0BackendStore:
                 history_db_path=str(history_db),
             )
             self._mem0 = Memory(config)
+            _close_on_exit(self._mem0)
             # The real hook: Memory.add()/.search() call
             # self.embedding_model.embed(text, "add"|"search") directly (see
             # _Mem0EmbedderAdapter's docstring for why this, not mem0's
