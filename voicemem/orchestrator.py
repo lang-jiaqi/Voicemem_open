@@ -1079,6 +1079,24 @@ class Orchestrator:
             extra_metadata={"created_at": observed_at} if observed_at else None,
         )
 
+        # 助手刚说的那句：**原样**存一条，不抽 fact。
+        #
+        # 为什么不抽：抽出来的是"助手推荐了清炒芦笋和椒盐香菇"这种——它记录的是
+        # 助手做了什么，不是用户其人，而且措辞跟当前对话高度重合，下一个问题一来
+        # 就得高分，把真正相关的记忆挤出 top-k。
+        # 为什么还要存：这样"你之前跟我说过什么"才答得上来。检索默认把 role=
+        # assistant 排除在外（见 mem0_backend_store.search），只有问题在问助手
+        # 自己说过什么时才放进来（asks_about_assistant）。
+        if agent_reply.strip():
+            try:
+                self._get_repo()._vector_store.add_text(
+                    self._user_id, agent_reply.strip(), attributed_to="assistant",
+                    metadata={"source": "agent_reply", "turn_id": vi.id,
+                              **({"time_start": observed_at} if observed_at else {})},
+                )
+            except Exception as e:
+                print(f"[ingest] 存助手原话失败：{e}", flush=True)
+
         # ── audiomem：场景/声纹标签写入 + 触发提醒 + 录音归档 + 主动推送 ─────────
         audiomem = self._write_audiomem_tags(
             result, scene_tag, scene_raw_labels, detection, audio_path,

@@ -326,6 +326,7 @@ class Mem0BackendStore:
         threshold: float | None = None,
         memory_id_filter: set[str] | list[str] | None = None,
         rescue_k: int = 0,
+        include_assistant: bool = False,
     ) -> list[MemorySearchHit]:
         q = query.strip()
         if not q:
@@ -340,7 +341,13 @@ class Mem0BackendStore:
         # search() takes user_id via filters={}, NOT a direct user_id= kwarg
         # (unlike add(), which does accept user_id= directly) -- confirmed
         # from the real installed SDK's signature, not assumed by analogy.
-        raw = self._mem0.search(q, filters={"user_id": user_id}, top_k=fetch_k, threshold=0.0)
+        # 助手说过的话也在同一个库里（role=assistant），默认不召回——问"我对什么
+        # 过敏"时冒出一句"助手建议你避开坚果"，等于让它引用自己，答案会越滚越偏。
+        # 只有问题本身在问"你之前说过什么"时才放进来（见 asks_about_assistant）。
+        flt: dict[str, Any] = {"user_id": user_id}
+        if not include_assistant:
+            flt["role"] = {"ne": "assistant"}
+        raw = self._mem0.search(q, filters=flt, top_k=fetch_k, threshold=0.0)
         entries = raw.get("results", []) if isinstance(raw, dict) else raw
 
         id_filter = set(memory_id_filter) if memory_id_filter else None

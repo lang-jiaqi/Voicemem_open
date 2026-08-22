@@ -64,6 +64,24 @@ def _search_mode(slot_ids: set, final_ids: set) -> str:
 
 # ── LeftBrain 组件 ─────────────────────────────────────────────────────────────
 
+#: 问题在问"你（助手）之前说过什么"时的词面信号。0 LLM——这个判断在投机预取
+#: 那条路上，不能为它发一次网络请求。
+_ASKS_ASSISTANT = (
+    # 中文：句子里同时出现"你"和"说/告诉/推荐/建议/提到"就算
+    "你说", "你告诉", "你跟我说", "你和我说", "你之前说", "你刚说", "你不是说",
+    "你讲过", "你提过", "你提到", "你推荐", "你建议", "你答应", "你教我",
+    "跟我说过", "告诉过我", "说过什么", "说了什么",
+    "you said", "you told", "you mentioned", "you recommend", "you suggest",
+    "did you say", "did you tell", "you talked about", "you promised",
+)
+
+
+def asks_about_assistant(query: str) -> bool:
+    """这个问题是不是在问助手自己说过的话。"""
+    q = (query or "").lower()
+    return any(w in q or w in (query or "") for w in _ASKS_ASSISTANT)
+
+
 class LeftBrain:
     """自持零件 + 依赖显式注入的左脑组件。
 
@@ -390,6 +408,8 @@ class LeftBrain:
         """在 candidate_ids 范围内做向量相似度排序，返回 top-N 记忆。"""
         fetch_k = max(top_k * 3, 20)   # 全库兜底时多拉候选
         repo = self._get_repo()
+        # 助手说过的话默认不召回；只有问题本身在问"你之前说过什么"才放进来。
+        want_assistant = asks_about_assistant(query)
 
         if candidate_ids:
             # 名额选择交给存储层：top_k 个按纯余弦发，额外补最多 _RESCUE_K 条被
@@ -400,19 +420,22 @@ class LeftBrain:
                 top_k=top_k,
                 rescue_k=_RESCUE_K,
                 memory_id_filter=candidate_ids,
+                include_assistant=want_assistant,
             )
             # 不足时从全库补齐——但按人过滤时不能这样做（会把其他人的记忆混进来），
             # 这种情况下宁可结果数少于 top_k。
             if len(hits) < top_k and not speaker_filter:
                 seen = {h.memory_id for h in hits}
-                for h in repo.search(query, user_id=self._user_id, top_k=fetch_k):
+                for h in repo.search(query, user_id=self._user_id, top_k=fetch_k,
+                                     include_assistant=want_assistant):
                     if h.memory_id not in seen:
                         hits.append(h)
                         seen.add(h.memory_id)
                         if len(hits) >= top_k:
                             break
         else:
-            hits = repo.search(query, user_id=self._user_id, top_k=fetch_k)[:top_k]
+            hits = repo.search(query, user_id=self._user_id, top_k=fetch_k,
+                               include_assistant=want_assistant)[:top_k]
 
         final_hits = hits[:top_k]
         # 记忆生命周期：检索命中增加热度，读取时按 last_hit_at 指数衰减、低热度归档。

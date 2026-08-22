@@ -282,12 +282,14 @@ class LeftBrainMemoryRepository:
         user_id: str,
         top_k: int = 5,
         threshold: float | None = None,
+        include_assistant: bool = False,
     ) -> list[MemorySearchHit]:
         return self._vector_store.search(
             query,
             user_id=user_id,
             top_k=top_k,
             threshold=threshold,
+            include_assistant=include_assistant,
         )
 
     def search_with_graph(
