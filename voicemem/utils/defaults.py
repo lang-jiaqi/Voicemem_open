@@ -56,6 +56,9 @@ def default_utils(base_url, memory_root):
     def memory_engine():
         from pathlib import Path
         from voicemem.leftbrain.mem0_backend_store import Mem0BackendStore
-        return Mem0BackendStore(embedding(), memory_root=Path(memory_root or "results/voice_memory"))
+        # memory_root 由 Orchestrator 传下来（已解析过默认值）；这里的兜底只在
+        # 直接构造 default_utils 时用得上，跟上面保持同一个默认。
+        return Mem0BackendStore(embedding(),
+                                memory_root=Path(memory_root or Path.cwd() / "voicemem_memory"))
     return {"embedding": embedding, "schema": schema, "entity": entity, "emotion": emotion,
             "voiceprint": voiceprint, "asr": asr, "vad": vad, "memory_engine": memory_engine}

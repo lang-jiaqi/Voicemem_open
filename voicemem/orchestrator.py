@@ -141,7 +141,7 @@ class Orchestrator:
         是否启用音频/情绪能力。
     memory_root:
         Memory storage directory.  Defaults to
-        ``<package_root>/results/voice_memory``.
+        ``<当前工作目录>/voicemem_memory``（env ``VOICEMEM_MEMORY_ROOT`` 可覆盖）。
     user_id:
         Owner of all memories managed by this instance.
     base_url:
@@ -199,10 +199,17 @@ class Orchestrator:
         if vector_store is None: vector_store = pick("memory_engine")
         if classifier is None:   classifier = pick("schema")
 
-        _pkg_root = Path(__file__).resolve().parent.parent
         self._vector_store = vector_store   # 注入的 memory engine（默认 None → mem0）
-        self._memory_root = Path(memory_root) if memory_root else (
-            _pkg_root / "results" / "voice_memory"
+        # 默认落在**当前工作目录**下，不是包的安装位置。
+        #
+        # 之前默认是 <包目录>/results/voice_memory —— pip 装的人记忆会写进
+        # site-packages/results/：升级包就没了、系统级 Python 往往只读、而且所有
+        # 项目共用一份。数据该跟着项目走，不该跟着程序装在哪走（git/docker/npm
+        # 都是这个逻辑）。VOICEMEM_MEMORY_ROOT 可覆盖。
+        self._memory_root = Path(
+            memory_root
+            or os.environ.get("VOICEMEM_MEMORY_ROOT")
+            or Path.cwd() / "voicemem_memory"
         )
         self._memory_root.mkdir(parents=True, exist_ok=True)
         self._cognitive_db = self._memory_root / "cognitive_graph.sqlite"

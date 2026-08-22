@@ -64,7 +64,9 @@ def _parse(argv):
                    help="静音多久由 VAD 确认一轮结束，交出 Turn")
     p.add_argument("--config", default=os.environ.get("VOICEMEM_CONFIG"),
                    help="一个 .json，整体覆盖下面的 CONFIG")
-    p.add_argument("--memory_root", default=os.environ.get("VOICEMEM_MEMORY_ROOT"),
+    p.add_argument("--memory_root",
+                   default=os.environ.get("VOICEMEM_MEMORY_ROOT")
+                   or str(_ROOT / "results" / "voice_memory"),
                    help="记忆库目录")
     return p.parse_args(argv)
 
@@ -76,15 +78,26 @@ from voicemem import VoiceMem                        # noqa: E402
 
 BARGE_DEBUG = os.environ.get("BARGE_DEBUG", "1") != "0"
 BARGE_THRESHOLD = float(os.environ.get("BARGE_THRESHOLD", "0.45"))  # 越小越容易被打断
-#: 要连续听到多久的人声才算"他真的插话了"。太短的话，助手自己的声音从扬声器
-#: 回到麦克风、回声消除没压干净的那点残留就够触发，表现是"刚说小半句就闭嘴"。
-BARGE_MIN_MS = int(os.environ.get("BARGE_MIN_MS", "280"))
+#: 转写要比上次多出这么多个字，才算"他真的插话了"。
+#: 之前这里是「连续人声 ≥280ms」，纯 VAD 判定太松——咳嗽、关门、AEC 没压干净的
+#: 助手回声都算人声，日志里一串"连续人声 → 请求打断 / 助手没在说，忽略"在空转。
+#: 换成等 ASR 真的吐出字，代价是多等一次出字（~200-300ms），换来不会自己掐自己。
+BARGE_MIN_CHARS = int(os.environ.get("BARGE_MIN_CHARS", "2"))
 #: 助手刚开口那一小段不允许被打断——那时候麦克风里几乎只有它自己的声音。
 BARGE_GRACE_MS = int(os.environ.get("BARGE_GRACE_MS", "500"))
+#: OpenAI 那侧用哪种回合/打断判定。semantic_vad 由模型判"这是不是真的在打断"，
+#: 对 backchannel（"嗯""对""哦"）不敏感；server_vad 只看有没有声音，所以助手自己
+#: 的回声、环境噪声都能把它掐了。模型或 SDK 不支持时会以 error 事件回来（不抛），
+#: 日志里看到就改回 TURN_DETECTION=server_vad。
+TURN_DETECTION = os.environ.get("TURN_DETECTION", "semantic_vad")
+#: semantic_vad 的抢答倾向：low 更愿意等你说完，high 更爱抢。
+VAD_EAGERNESS = os.environ.get("VAD_EAGERNESS", "low")
 MIC_RATE = 24000                       # 前端上行的采样率（index.html 的 SAMPLE_RATE）
 #: 按声纹拦陌生人。默认开——启动时预热过、又在后台线程算，实测对延迟零影响
 #: （memory_hits 仍在 EOU 前 0.63s 到达，跟关掉时一样）。
 SPEAKER_GATE = os.environ.get("VOICEMEM_SPEAKER_GATE", "1") != "0"   # 打断为什么没触发：看这几行日志
+#: 每轮都打一行说话人判定（默认只在判成陌生人时打）。
+SPEAKER_DEBUG = os.environ.get("SPEAKER_DEBUG", "0") != "0"
 MODE = ARGS.mode                                     # llm_tts | realtime
 SPEC_MIN_CHARS = ARGS.spec_min_chars                 # partial 起投机
 GAMBLE_S  = ARGS.gamble_ms / 1000                    # 赌说完
@@ -108,6 +121,23 @@ _RT_PERSONA = (
 _STRANGER = ("说话的不是你认识的那个人——声纹对不上。你对他没有任何记忆。"
              "别把别人的事讲给他听，也别猜他是谁。就当第一次见面，"
              "友好但如实地说你还不认识他。")
+
+
+def _turn_detection() -> dict:
+    """OpenAI 那侧的回合/打断判定。两种 provider 的参数**不通用**——semantic_vad
+    不吃 threshold / prefix_padding_ms / silence_duration_ms，传了整段会被静默拒绝
+    （只以 error 事件回来）。所以两套各写各的，别合并。
+
+    create_response=False   什么时候回复由我们决定（本地判完一轮、记忆预取好）
+    interrupt_response=True 用户一开口，服务端直接掐掉正在播的回复
+    """
+    base = {"type": TURN_DETECTION, "create_response": False, "interrupt_response": True}
+    if TURN_DETECTION == "semantic_vad":
+        return {**base, "eagerness": VAD_EAGERNESS}
+    # server_vad：默认 0.5 对插话太钝——人隔着扬声器说话，回声消除处理过之后
+    # 信号本来就弱，够不到阈值就等于打不断。
+    return {**base, "threshold": BARGE_THRESHOLD,
+            "prefix_padding_ms": 200, "silence_duration_ms": 320}
 
 
 def _realtime_instructions(memory_context: str, stranger: bool = False) -> str:
@@ -337,7 +367,7 @@ async def anticipate(sock, on_frame=None, on_speech=None, owner=None):
     last_partial = ""
     if owner is None:
         owner = {"id": "", "last": ""}    # 主人的声纹 / 上一轮是谁
-    speech_ms = 0.0                       # 连续听到人声多久了
+    barge_base = 0                        # 上次触发打断时的转写长度
     while True:
         msg = await sock.receive()
         if msg.get("type") == "websocket.disconnect":         # 关页面/刷新：收工
@@ -354,23 +384,21 @@ async def anticipate(sock, on_frame=None, on_speech=None, owner=None):
         if on_frame:
             await on_frame(raw)                               # 方案 A：音频也进 OpenAI 缓冲
         st = await stream.feed(raw)                           # 核心：ASR + VAD + 投机预取
-        # 连续人声累计够 BARGE_MIN_MS 才算插话。单帧就触发的话，助手自己的声音
-        # 经扬声器回到麦克风、AEC 没压干净的那点残留就能把它自己打断。
-        frame_ms = len(raw) / 2 / MIC_RATE * 1000              # PCM16：2 字节一个样本
-        if st.state == "<speak>":
-            speech_ms += frame_ms
-        else:
-            speech_ms = 0.0
-        if speech_ms >= BARGE_MIN_MS and on_speech:
-            speech_ms = 0.0
+        # 打断走「ASR 确认制」：不是听到人声就掐，而是等转写真的多出几个字。
+        # 助手的回声进了 ASR 也转不出连贯的新字，咳嗽和关门声更不会——这一条
+        # 比任何 VAD 阈值都好使，见 BARGE_MIN_CHARS 上面那段。
+        grown = len(st.text.strip()) - barge_base
+        if grown >= BARGE_MIN_CHARS and on_speech:
+            barge_base = len(st.text.strip())
             if BARGE_DEBUG:
-                print(f"[barge] 连续人声 ≥{BARGE_MIN_MS}ms → 请求打断", flush=True)
+                print(f"[barge] 转写多出 {grown} 个字 → 请求打断：{st.text[-12:]!r}", flush=True)
             await on_speech()
         if st.text.strip() and st.text != last_partial:
             last_partial = st.text
             await sock.send_json({"type": "partial_transcript", "text": st.text, "replace": True})
         if st.turn:                                           # VAD 确认说完 → 记忆早已预取好
             last_partial = ""
+            barge_base = 0                                    # 新一轮，转写从头开始涨
             # 谁在说话。第一个开口的人算这场对话的主人；之后换了另一个声纹，
             # 就是陌生人——不能把主人的记忆讲给他听（"我是谁？"→"你是Jiaqi"
             # 这个 bug 就是因为检索从不看说话人）。
@@ -380,6 +408,11 @@ async def anticipate(sock, on_frame=None, on_speech=None, owner=None):
             # 表现就是"ASR 很卡"。代价是换人之后第一句仍按上一个人算。
             stranger = bool(SPEAKER_GATE and owner["id"] and owner["last"]
                             and owner["last"] != owner["id"])
+            if stranger or SPEAKER_DEBUG:
+                # "他怎么突然不认识我了"——看这一行。声纹把同一个人认成两个
+                # person_* 时就会这样：记忆被清空，指令换成"就当第一次见面"。
+                print(f"[speaker] owner={owner['id'] or '-'} last={owner['last'] or '-'}"
+                      f" stranger={stranger}", flush=True)
             yield Pending(st.turn.text,
                           "" if stranger else st.turn.memory_context,
                           st.turn.result, spoken=True,
@@ -458,24 +491,29 @@ async def realtime_session(sock):
             await conn.session.update(session={
                 "type": "realtime",
                 "audio": {
-                    "input": {"turn_detection": {
-                        "type": "server_vad", "create_response": False,
-                        "interrupt_response": True,
-                        # 默认 0.5 对插话太钝——人隔着扬声器说话，回声消除处理过
-                        # 之后信号本来就弱，够不到阈值就等于打不断。调低到 0.3，
-                        # 并把判定人声所需的静音缩短，抢答一点也比闷头说完好。
-                        "threshold": BARGE_THRESHOLD,
-                        "prefix_padding_ms": 200,
-                        "silence_duration_ms": 320,
-                    }},
+                    "input": {"turn_detection": _turn_detection()},
                     "output": {"voice": utils.RT_VOICE},
                 },
             })
             connected = True
 
-            # 这一轮的状态：谁在说、说了什么、这轮用户的输入是什么
-            turn = {"live": False, "reply": "", "pending": None, "t0": 0.0}
+            # 这一轮的状态：谁在说、说了什么、这轮用户的输入是什么。
+            # until：前端预计几点才把已发出去的音频播完（见 hearing()）。
+            turn = {"live": False, "reply": "", "pending": None,
+                    "t0": 0.0, "until": 0.0}
             owner = {"id": "", "last": ""}
+
+            def hearing() -> bool:
+                """用户此刻还听不听得见助手。
+
+                不能用 turn["live"] 代替：realtime 推音频比实时播放快得多，一段
+                十几秒的回复两三秒就推完了，response.done 一到 live 就变 False，
+                可前端那边还在播剩下的十几秒。这时候用户插话，on_speech 看到
+                live=False 就"忽略"，前端从没收到 answer_interrupt——表现正是
+                "打断没反应，它非要念完"。
+                所以按**已发出去的音频时长**算：24k PCM16，一个样本 2 字节。
+                """
+                return turn["live"] or time.monotonic() < turn["until"]
 
             def close_turn():
                 """一轮结束（说完或被打断）：把两半对话一起存。被打断时存的是用户
@@ -499,7 +537,12 @@ async def realtime_session(sock):
                     t = getattr(ev, "type", "")
                     if t.endswith("output_audio.delta"):
                         if turn["live"]:
-                            await sock.send_bytes(base64.b64decode(ev.delta))
+                            pcm = base64.b64decode(ev.delta)
+                            # 前端是排队播的（index.html 的 nextPlay），这里跟着算
+                            # 同一条时间线：上一块播完之后再接这一块。
+                            turn["until"] = (max(turn["until"], time.monotonic())
+                                             + len(pcm) / 2 / 24000)
+                            await sock.send_bytes(pcm)
                     elif t.endswith("output_audio_transcript.delta"):
                         if turn["live"]:
                             turn["reply"] += ev.delta
@@ -518,10 +561,17 @@ async def realtime_session(sock):
                             print(f"[web] realtime 事件错误：{err or ev}", flush=True)
                     elif t.endswith("input_audio_buffer.speech_started"):
                         # OpenAI 的 VAD 听到人声：它那侧已经掐了回复，我们同步收尾
+                        since = (time.monotonic() - turn["t0"]) * 1000
                         if BARGE_DEBUG:
-                            print(f"[barge] OpenAI VAD 听到人声 (live={turn['live']})", flush=True)
-                        if turn["live"]:
-                            turn["live"] = False
+                            print(f"[barge] OpenAI VAD 听到人声 (live={turn['live']}, "
+                                  f"还在播={hearing()}, {since:.0f}ms)", flush=True)
+                        # 宽限期，跟本地那条路一样。本地 VAD 判完一轮（静音 500ms）就
+                        # 发 response.create，而 OpenAI 的 server_vad 只要 320ms 静音就
+                        # 认为下一句开始了——用户的话尾、呼吸声、环境噪声都够触发。
+                        # 没有这道门的话，speech_started 会在助手出声之前就到，
+                        # 回复被掐在第一个音频块之前：一个字都听不见，还不报错。
+                        if hearing() and since >= BARGE_GRACE_MS:
+                            turn["live"], turn["until"] = False, 0.0
                             await sock.send_json({"type": "answer_interrupt"})
                             close_turn()
                     elif t.endswith("response.done") or t.endswith("response.cancelled"):
@@ -533,8 +583,8 @@ async def realtime_session(sock):
                 await conn.input_audio_buffer.append(audio=base64.b64encode(raw).decode())
 
             async def on_speech():
-                """用户在助手说话时开口 → 打断。幂等：live 一置 False 就不再触发。"""
-                if not turn["live"]:
+                """用户在助手说话时开口 → 打断。幂等：hearing() 一变假就不再触发。"""
+                if not hearing():
                     if BARGE_DEBUG:
                         print("[barge] 有人声但助手没在说，忽略", flush=True)
                     return
@@ -546,8 +596,10 @@ async def realtime_session(sock):
                         print(f"[barge] 才说了 {since:.0f}ms，还在宽限期内，不打断", flush=True)
                     return
                 if BARGE_DEBUG:
-                    print("[barge] ★ 打断：本地VAD 触发", flush=True)
-                turn["live"] = False
+                    left = max(0.0, turn["until"] - time.monotonic()) * 1000
+                    print(f"[barge] ★ 打断：转写触发（前端还剩 {left:.0f}ms 没播完）",
+                          flush=True)
+                turn["live"], turn["until"] = False, 0.0
                 # 先通知前端停播——这是本地操作，立刻生效；而 response.cancel() 要
                 # 等一次 OpenAI 往返。之前顺序反了，人插话后还得听完那一个往返的
                 # 时间，听感就是"打断没用，他非要说完"。
@@ -559,9 +611,10 @@ async def realtime_session(sock):
             try:
                 async for pending in anticipate(sock, on_frame=on_frame,
                                                 on_speech=on_speech, owner=owner):
-                    if turn["live"]:                     # 上一轮还没说完就被新的一轮顶掉
+                    if hearing():                        # 上一轮还没播完就被新的一轮顶掉
                         await on_speech()
-                    turn.update(live=True, reply="", pending=pending, t0=time.monotonic())
+                    turn.update(live=True, reply="", pending=pending,
+                                t0=time.monotonic(), until=0.0)
                     await start_realtime_turn(pending, conn, sock.send_json)
             finally:
                 pump_task.cancel()
