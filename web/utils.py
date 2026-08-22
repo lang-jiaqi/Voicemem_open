@@ -63,10 +63,37 @@ def realtime_connect(reply=None):
 
 
 # ── SearchResult → 脑图 html 认识的 memory_hits 负载 ──────────────────────────
+def _emotion_of(rb_hits) -> str:
+    """这一轮右脑命中里带的情绪标签。
+
+    前端原来是拿正则去 content 里抠「x」——那是 heartnote 内心OS 的写法，
+    而内心OS 现在是有 gate 的（不是每轮都生成），抠不到就一直不显示。情绪本来
+    就在 metadata.emotion 里，直接给前端，别让它猜。
+    """
+    # 本轮的情绪（current_signal 的 affect_hint）优先于检索回来的旧记忆上那个——
+    # 标签栏写的是"现在他什么心情"，不是"想起来的那件事当时什么心情"。
+    for want_now in (True, False):
+        for h in (rb_hits or []):
+            if (getattr(h, "source", "") == "current_signal") != want_now:
+                continue
+            emo = ((getattr(h, "metadata", None) or {}).get("emotion") or "").strip()
+            if emo:
+                return emo
+    return ""
+
+
 def hits_payload(result, has_audio=None, cluster_of=None):
     """has_audio(memory_id) -> bool：这条记忆有没有存档的原音频。
-    有的话前端给一个播放按钮——"我上周五听的那首歌"能被原样放回来。"""
+    前端据此决定要不要在这一轮自动把当时那段原声放回来。"""
+    rb = getattr(result, "rb_hits", None) or []
+    cls = getattr(result, "classification", None)
     return {
+        # slot 和情绪跟着这一轮的检索结果一起发。前端原来是另发一次
+        # /api/classify 再等它回来——那是条竞态：memory_hits 先到时 curSlots
+        # 还是空的，标签栏就空着。这里用的是 Search 本来就算好的分类，0 额外开销。
+        "slots": list(getattr(cls, "slots", []) or []),
+        "entities": list(getattr(cls, "entities", []) or []),
+        "emotion": _emotion_of(rb),
         "left_brain": [{"text": h.text, "score": h.score, "attributed_to": h.attributed_to,
                         "memory_id": h.memory_id,
                         "has_audio": bool(has_audio and has_audio(h.memory_id))}
@@ -119,7 +146,11 @@ def build_app(mode, session, classify, snapshot=None, audio_of=None):
                 messages=[
                     {"role": "system", "content":
                      "用不超过 12 个字概括这段对话在说什么，做标题用。"
-                     "只输出标题本身，不要引号、不要标点、不要「关于」这类开头。"},
+                     "只输出标题本身，不要引号、不要标点、不要「关于」这类开头。"
+                     # 开场常是"喂喂喂""测试一下""你好"，照实概括就成了"语音测试"，
+                     # 而这段对话后面聊的可能是完全另一回事。
+                     "忽略开头的寒暄、试麦、确认能不能听见这类内容，"
+                     "抓真正聊到的事情。整段都只是打招呼时，才叫「随便聊聊」。"},
                     {"role": "user", "content": body.text[:600]},
                 ],
             )

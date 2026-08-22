@@ -96,6 +96,9 @@ MIC_RATE = 24000                       # 前端上行的采样率（index.html �
 #: 按声纹拦陌生人。默认开——启动时预热过、又在后台线程算，实测对延迟零影响
 #: （memory_hits 仍在 EOU 前 0.63s 到达，跟关掉时一样）。
 SPEAKER_GATE = os.environ.get("VOICEMEM_SPEAKER_GATE", "1") != "0"   # 打断为什么没触发：看这几行日志
+#: 连续几轮认成别人才判"陌生人"。1 = 一轮就翻脸（demo 里演"换个人说话"要的就是
+#: 这个）；声纹库脏、老是把主人认成新人时，调到 2 能挡掉大部分误判。
+STRANGER_MIN_TURNS = int(os.environ.get("STRANGER_MIN_TURNS", "1"))
 #: 每轮都打一行说话人判定（默认只在判成陌生人时打）。
 SPEAKER_DEBUG = os.environ.get("SPEAKER_DEBUG", "0") != "0"
 MODE = ARGS.mode                                     # llm_tts | realtime
@@ -112,15 +115,77 @@ _RT_PERSONA = (
     "一个字都不要说出来。听出他心情不好就先接住情绪再说事；"
     "知道他不好意思开口，就别追问；知道他讨厌什么，就绕开。\n"
     "别复述他刚说的话，别用「我记得你说过」开头，别念清单。\n"
-    "说话方式：像朋友聊天那样有起伏——该笑就笑出来，替他高兴就热一点，"
-    "他难过就把语速放慢、声音压低。用「嗯」「哎」「诶」这种口头反应开头，"
-    "不要播音腔，不要每句都四平八稳。句子短，一次说一两句就停。"
+    # 只写"别怎么做"，模型就什么都不敢碰，回一句"怎么啦，跟我说说"——记忆明明
+    # 取到了却一个字没用上。这条是反过来说"该怎么做"，也是整套记忆最值钱的地方：
+    # 从含糊的一句话里猜出具体那件事。
+    "他说得含糊时（「最近压力好大」「今天好累」「我难受」），**不要泛泛安慰、"
+    "也不要问「怎么了」**。从 MEMORY CONTEXT 里挑出最可能是原因的那件具体的事，"
+    "直接说出来问他是不是，并且带上你记得的细节和日期。\n"
+    "  例：「今天是不是那个面试？你为它准备了快两个月……听着不太顺利？」\n"
+    "  猜错没关系，他会纠正你——那也比一句「怎么了」有用得多。\n"
+    "说话方式：这是**说出来**的话，不是念出来的字。语调必须有起伏——重要的词"
+    "咬重一点，问句尾音扬起来，替他难过时放慢、压低，替他高兴就热起来。"
+    # 原来写的是"用「嗯」「哎」「诶」这种口头反应开头"——模型当成了每句都要执行的
+    # 规则，于是每一轮都"哎"字打头，比播音腔还假。语气词是偶尔漏出来的，不是格式。
+    "别每句都用同一个口头禅开头——大多数时候直接说正事，"
+    "只有真的有反应时（惊讶、心疼、想笑）才带一个语气词。绝对不要播音腔，"
+    "宁可说得像随口一句，也不要四平八稳。句子短，一次说一两句就停。"
 )
 
 
 _STRANGER = ("说话的不是你认识的那个人——声纹对不上。你对他没有任何记忆。"
              "别把别人的事讲给他听，也别猜他是谁。就当第一次见面，"
              "友好但如实地说你还不认识他。")
+
+
+#: 问的是"一段声音"时才回放。故意做得很笨——这是个触发词表，不是意图分类器：
+#: 多放一次听感上只是"它把当时那段放给你听"，判漏了也只是回到手动点 ▶。
+_SOUND_WORDS = ("歌", "曲", "调子", "旋律", "音乐", "哼", "那段声音", "放来听",
+                "放给我听", "播一下", "什么声音")
+
+
+def _musical_memory_ids() -> set[str]:
+    """音频里**真的有音乐**的那些记忆。
+
+    ingest 时音乐识别命中过的一轮，会被打上 ``tune:<tune_id>`` 标签（跟
+    ``scene:café`` / ``speaker:person_x`` 一样存在 memory_tags 里）。有了它就不用
+    靠用户正好说过"我听到一首歌"——在咖啡馆随便聊，那一轮的背景音乐照样被记下来。
+
+    读失败就返回空集：这只是个偏好排序，取不到就退回原来的"第一条有音频的"。
+    """
+    try:
+        tunes = vm._o._audio._music_store().list_tunes()
+        ids = [f"tune:{t['tune_id']}" for t in tunes]
+        if not ids:
+            return set()
+        store = vm._o._get_repo()._cognitive_store
+        return set(store.memory_ids_for_slots_v2(vm._o._user_id, ids))
+    except Exception as e:
+        print(f"[web] 读音乐标签失败（不影响回放）：{type(e).__name__}: {e}", flush=True)
+        return set()
+
+
+def _replay_id(text: str, result) -> str:
+    """这一轮该不该把当时那段原声放回来，返回要放的 memory_id（不放就空串）。
+
+    两个条件都要满足：问的是声音，且检索到的那条记忆真的存了音频——
+    音频只有语音轮才会落盘（见 save_turn_audio），种子里带 audio= 的那条也有。
+
+    有多条可放时，**优先挑音频里真的有音乐的那条**（``tune:`` 标签，见
+    ``_musical_memory_ids``）。不这么挑的话，"咖啡馆那首歌"很可能放出来的是同一
+    场景下你自己说话的另一段录音——链路看着是通的，听感是"它放错了"。
+    """
+    if not any(w in (text or "") for w in _SOUND_WORDS):
+        return ""
+    playable = [h.memory_id for h in (getattr(result, "hits", None) or [])
+                if audio_of(h.memory_id)]
+    if not playable:
+        return ""
+    musical = _musical_memory_ids()
+    for mid in playable:
+        if mid in musical:
+            return mid
+    return playable[0]
 
 
 def _turn_detection() -> dict:
@@ -140,14 +205,26 @@ def _turn_detection() -> dict:
             "prefix_padding_ms": 200, "silence_duration_ms": 320}
 
 
-def _realtime_instructions(memory_context: str, stranger: bool = False) -> str:
+#: 要回放时追加的一句。不加的话模型会去"描述"那段音频（"你说那是一首很轻快的
+#: 钢琴曲…"）——它根本没听过那段音频，描述全是编的；而且用户马上就要亲耳听到。
+_REPLAY_NOTE = ("你手上有他当时那段录音，说完这句就会放给他听。"
+                "所以别去描述那段声音是什么样的——你没听过，别编。"
+                "就短短一句把它引出来，像「我把当时那段找出来了，你听听是不是这个」，"
+                "然后停住，等他听。")
+
+
+def _realtime_instructions(memory_context: str, stranger: bool = False,
+                           replay: bool = False) -> str:
     """人设 + 这一轮检索到的记忆。要说清楚这是「你记得的事」，否则模型会把它当成
     背景资料念出来，而不是当成自己对这个用户的记忆自然地用。"""
     if stranger:
         return f"{_RT_PERSONA}\n\n{_STRANGER}"
-    if not memory_context:
-        return _RT_PERSONA
-    return f"{_RT_PERSONA}\n\n{memory_context}"
+    parts = [_RT_PERSONA]
+    if memory_context:
+        parts.append(memory_context)
+    if replay:
+        parts.append(_REPLAY_NOTE)
+    return "\n\n".join(parts)
 
 
 # ══════════════════ 统一配置入口：一个 dict 配齐所有本地/api 模型 ══════════════════
@@ -213,6 +290,7 @@ class Pending:
     audio_path: str = ""         # 这一轮落盘的 wav；ingest 拿它做场景/音乐/声纹感知，
                                  # 并在 audio_archive 里跟记忆绑定，之后能原样放回来
     stranger: bool = False       # 声纹认出说话的不是这个记忆库的主人
+    replay: str = ""             # 该把哪条记忆当时那段原声放回来（memory_id），空=不放
 
 
 # ══════════════════ 两条控制流（各 ~10 行，只消费预取好的 Pending）══════════════════
@@ -230,6 +308,8 @@ async def voicemem_llm_tts(pending, send, send_audio, owner):
     """
     await send({"type": "user_transcript", "text": pending.text})
     await send({"type": "memory_hits", **utils.hits_payload(pending.result, has_audio=audio_of, cluster_of=hit_cluster)})
+    if pending.replay:
+        await send({"type": "play_memory", "memory_id": pending.replay})
     await send({"type": "answer_start"})
 
     queue: asyncio.Queue = asyncio.Queue()
@@ -251,8 +331,10 @@ async def voicemem_llm_tts(pending, send, send_audio, owner):
         # 人设和「右脑不许念出来」的约束就悄悄没了。
         # 走核心回复层（人设在 CONFIG.reply.llm.config.system，见 voicemem/reply.py
         # 的 compose_system：system + memory_context，和 realtime 那条拼出来的一样）。
-        async for d in vm.reply_stream(
-                pending.text, _STRANGER if pending.stranger else pending.memory_context):
+        ctx = _STRANGER if pending.stranger else pending.memory_context
+        if pending.replay:
+            ctx = f"{ctx}\n\n{_REPLAY_NOTE}" if ctx else _REPLAY_NOTE
+        async for d in vm.reply_stream(pending.text, ctx):
             reply += d
             buf += d
             await send({"type": "answer_delta", "text": d})
@@ -289,6 +371,10 @@ async def start_realtime_turn(pending, conn, send):
     """
     await send({"type": "user_transcript", "text": pending.text})
     await send({"type": "memory_hits", **utils.hits_payload(pending.result, has_audio=audio_of, cluster_of=hit_cluster)})
+    if pending.replay:
+        # 前端收下先记着，等这一轮回复播完再放——助手的回复是排队播的，
+        # 提前放会跟人声叠在一起。
+        await send({"type": "play_memory", "memory_id": pending.replay})
     if pending.spoken:
         await conn.input_audio_buffer.commit()
     else:
@@ -298,7 +384,8 @@ async def start_realtime_turn(pending, conn, send):
     # 后者是会话级设置，实测更新完模型这一轮根本读不到（问"我的猫叫什么"，库里
     # 明明检索到了"叫墨墨"，模型还答"你刚提过但我没听清"）。
     await conn.response.create(response={
-        "instructions": _realtime_instructions(pending.memory_context, pending.stranger),
+        "instructions": _realtime_instructions(pending.memory_context, pending.stranger,
+                                               replay=bool(pending.replay)),
     })
     await send({"type": "answer_start"})
 
@@ -351,12 +438,22 @@ def remember_turn(pending, reply: str, owner: dict) -> None:
     except Exception as e:
         print(f"[web] 存这一轮失败：{type(e).__name__}: {e}", flush=True)
         return
+    # 上一轮的情绪留给下一轮的投机检索用。没有它右脑取不到情感记录，
+    # 每轮只会返回同样那几条静态画像（见 voicemem/stream.py 的 emotion 说明）。
+    affect = r.get("affect")
+    if isinstance(affect, dict):
+        affect = affect.get("emotion") or affect.get("label") or ""
+    owner["emotion"] = str(affect or "").strip()
+
     sid = r.get("speaker_id") or ""
     if not sid:
+        # 这一轮太短，声纹压根没算（见 perceiver 的 VOICEMEM_SPEAKER_MIN_S）。
+        # 不知道是谁 ≠ 换了个人，所以连 miss 计数都不动。
         return
     if not owner["id"]:
         owner["id"] = sid                  # 第一个开口的算这场对话的主人
     owner["last"] = sid
+    owner["miss"] = 0 if sid == owner["id"] else owner.get("miss", 0) + 1
 
 
 async def anticipate(sock, on_frame=None, on_speech=None, owner=None):
@@ -366,7 +463,7 @@ async def anticipate(sock, on_frame=None, on_speech=None, owner=None):
     stream = vm.stream(spec_min_chars=SPEC_MIN_CHARS, gamble_s=GAMBLE_S, confirm_s=CONFIRM_S)
     last_partial = ""
     if owner is None:
-        owner = {"id": "", "last": ""}    # 主人的声纹 / 上一轮是谁
+        owner = {"id": "", "last": "", "miss": 0}   # 主人的声纹 / 上一轮是谁 / 连续认错几轮
     barge_base = 0                        # 上次触发打断时的转写长度
     while True:
         msg = await sock.receive()
@@ -375,14 +472,17 @@ async def anticipate(sock, on_frame=None, on_speech=None, owner=None):
         if msg.get("text"):                                   # 打字轮
             data = json.loads(msg["text"])
             if data.get("type") == "user_text" and data.get("text", "").strip():
+                stream.emotion = owner.get("emotion") or None
                 turn = await stream.feed_text(data["text"])
-                yield Pending(turn.text, turn.memory_context, turn.result, spoken=False)
+                yield Pending(turn.text, turn.memory_context, turn.result, spoken=False,
+                              replay=_replay_id(turn.text, turn.result))
             continue
         if msg.get("bytes") is None:
             continue
         raw = msg["bytes"]
         if on_frame:
             await on_frame(raw)                               # 方案 A：音频也进 OpenAI 缓冲
+        stream.emotion = owner.get("emotion") or None         # 上一轮算出来的情绪
         st = await stream.feed(raw)                           # 核心：ASR + VAD + 投机预取
         # 打断走「ASR 确认制」：不是听到人声就掐，而是等转写真的多出几个字。
         # 助手的回声进了 ASR 也转不出连贯的新字，咳嗽和关门声更不会——这一条
@@ -406,19 +506,20 @@ async def anticipate(sock, on_frame=None, on_speech=None, owner=None):
             # 直接读 st.speaker_id 会同步跑声纹+情绪+场景一整套模型——实测 2.1 秒，
             # 而且是在事件循环里，这期间连 socket 都不读，麦克风帧全堆着，
             # 表现就是"ASR 很卡"。代价是换人之后第一句仍按上一个人算。
-            stranger = bool(SPEAKER_GATE and owner["id"] and owner["last"]
-                            and owner["last"] != owner["id"])
+            stranger = bool(SPEAKER_GATE and owner["id"]
+                            and owner.get("miss", 0) >= STRANGER_MIN_TURNS)
             if stranger or SPEAKER_DEBUG:
                 # "他怎么突然不认识我了"——看这一行。声纹把同一个人认成两个
                 # person_* 时就会这样：记忆被清空，指令换成"就当第一次见面"。
                 print(f"[speaker] owner={owner['id'] or '-'} last={owner['last'] or '-'}"
-                      f" stranger={stranger}", flush=True)
+                      f" miss={owner.get('miss', 0)} stranger={stranger}", flush=True)
             yield Pending(st.turn.text,
                           "" if stranger else st.turn.memory_context,
                           st.turn.result, spoken=True,
                           audio_path=await asyncio.to_thread(
                               save_turn_audio, getattr(st, "_pcm", None)),
-                          stranger=stranger)
+                          stranger=stranger,
+                          replay="" if stranger else _replay_id(st.turn.text, st.turn.result))
 
 
 
@@ -437,7 +538,7 @@ async def llm_tts_session(sock):
     现在回复丢进后台任务，读 socket 的循环一刻不停；听到人声就取消那个任务。
     """
     turn = {"task": None, "t0": 0.0}
-    owner = {"id": "", "last": ""}
+    owner = {"id": "", "last": "", "miss": 0}
 
     async def stop_reply():
         task = turn["task"]
@@ -500,8 +601,8 @@ async def realtime_session(sock):
             # 这一轮的状态：谁在说、说了什么、这轮用户的输入是什么。
             # until：前端预计几点才把已发出去的音频播完（见 hearing()）。
             turn = {"live": False, "reply": "", "pending": None,
-                    "t0": 0.0, "until": 0.0}
-            owner = {"id": "", "last": ""}
+                    "t0": 0.0, "until": 0.0, "first": False}
+            owner = {"id": "", "last": "", "miss": 0}
 
             def hearing() -> bool:
                 """用户此刻还听不听得见助手。
@@ -537,6 +638,12 @@ async def realtime_session(sock):
                     t = getattr(ev, "type", "")
                     if t.endswith("output_audio.delta"):
                         if turn["live"]:
+                            if not turn["first"]:
+                                # 首帧音频延迟：response.create 发出去到 OpenAI 吐第一块
+                                # 声音之间的时间。这是"它反应慢"里我们控制不了的那半。
+                                turn["first"] = True
+                                print(f"[lat] realtime 首帧 "
+                                      f"{(time.monotonic()-turn['t0'])*1000:.0f}ms", flush=True)
                             pcm = base64.b64decode(ev.delta)
                             # 前端是排队播的（index.html 的 nextPlay），这里跟着算
                             # 同一条时间线：上一块播完之后再接这一块。
@@ -614,7 +721,7 @@ async def realtime_session(sock):
                     if hearing():                        # 上一轮还没播完就被新的一轮顶掉
                         await on_speech()
                     turn.update(live=True, reply="", pending=pending,
-                                t0=time.monotonic(), until=0.0)
+                                t0=time.monotonic(), until=0.0, first=False)
                     await start_realtime_turn(pending, conn, sock.send_json)
             finally:
                 pump_task.cancel()
@@ -703,6 +810,10 @@ def fact_index(uid: str) -> dict:
         return {}
 
 
+#: 右脑每个 slot 在脑图上最多画几个 entity。
+RB_ENTITIES_PER_SLOT = int(os.environ.get("VOICEMEM_RB_GRAPH_PER_SLOT", "6"))
+
+
 def right_brain_tree(uid: str, facts: dict) -> list:
     """右脑真实的三层结构：slot → entity → 挂在下面的 heartnote。
 
@@ -716,6 +827,11 @@ def right_brain_tree(uid: str, facts: dict) -> list:
     repo = vm._o._right._rb_repo()
     notes = {}
     for m in repo.list_all(uid):
+        # response_experience 记的是"助手上次怎么答的"，是给回复层看的内部笔记，
+        # 不是对用户其人的认识。脑图上不该有它——它长出来的节点写着助手自己
+        # 说过的话，看着像"系统把自己的回复当成了对你的了解"。
+        if getattr(m, "memory_class", "") == "response_experience":
+            continue
         meta = getattr(m, "metadata", None) or {}
         notes[m.id] = {
             "text": m.content,
@@ -726,14 +842,21 @@ def right_brain_tree(uid: str, facts: dict) -> list:
     out = []
     for slot in graph.list_slots(uid):
         cluster = SLOT_TO_CLUSTER.get(slot.name, "experiences")
+        # 每个 slot 只取证据最多的前几个 entity。库里跑一阵就有 70 个 entity，
+        # 全画上去右半球糊成一片（左脑同期才 26 条），而且尾巴上那些多是只被
+        # 一条 heartnote 支撑的偶发观察，信息量低、占地方。
+        ents = []
         for ent in graph.get_entities_for_slot(uid, slot.id):
-            mids = graph.get_memories_for_entity(ent.id)
+            mids = [i for i in graph.get_memories_for_entity(ent.id) if i in notes]
+            ents.append((len(mids), ent, mids))
+        ents.sort(key=lambda t: -t[0])
+        for _, ent, mids in ents[:RB_ENTITIES_PER_SLOT]:
             out.append({
                 "cluster": cluster,
                 "slot": slot.name,
                 "text": ent.name,                      # 脑图上显示的就是这个
                 "desc": getattr(ent, "description", "") or "",
-                "notes": [notes[i] for i in mids if i in notes],
+                "notes": [notes[i] for i in mids],
             })
     return out
 
@@ -757,6 +880,9 @@ def memory_snapshot(limit: int = 48) -> dict:
         for slot in SlotV2:
             for mid in cog.memory_ids_for_slots(uid, [slot]):
                 slot_of.setdefault(mid, slot.value)
+        # 助手自己说过的话也原样存在库里（见 3ed67f7），但脑图画的是"关于用户的
+        # 记忆"——把助手的回复也长成节点，等于把它自己说的话当成对用户的认识。
+        entries = [e for e in entries if e.get("role") != "assistant"]
         for e in entries[:limit]:
             # list_entries 的 date 直接截了 time_start 前 10 位，遇到纯时间串会切出
             # "09:20:37" 这种。不像日期就置空，别把垃圾送到前端。
