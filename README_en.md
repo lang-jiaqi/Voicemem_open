@@ -240,13 +240,22 @@ The basic flow is:
 **microphone → VoiceMem listens and prefetches relevant memories → your model reads those memories and generates a response**
 
 ```bash
-pip install funasr sounddevice transformers peft torch
+pip install openai sounddevice scipy kokoro
 
 export OPENAI_API_KEY=sk-...
 # Only used for fact extraction when writing memories.
 # Memory retrieval runs entirely locally.
 
-python examples/04_voice_agent_own_model.py
+python examples/03_simple_agent_with_voicemem_memory.py
+```
+
+To use your own model, replace the generation step — the memory half stays as is:
+
+```python
+def my_reply(text, memory_context):        # a sync function is fine, it runs off-thread
+    return my_model.generate(system=memory_context, user=text)
+
+vm = VoiceMem(reply=my_reply)
 ```
 
 ## 🛠️ Finetuning

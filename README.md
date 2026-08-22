@@ -239,13 +239,22 @@ VoiceMem 家族开源模型包括 **Qwen2.5-Omni、Qwen3-Omni 和 Step-Audio2-Mi
 **麦克风 → VoiceMem 监听语音并提前检索相关记忆 → 你的模型读取这些记忆并生成回答**
 
 ```bash
-pip install funasr sounddevice transformers peft torch
+pip install openai sounddevice scipy kokoro
 
 export OPENAI_API_KEY=sk-...
 # 仅在写入记忆时用于事实信息提取。
 # 记忆检索完全在本地运行。
 
-python examples/04_voice_agent_own_model.py
+python examples/03_simple_agent_with_voicemem_memory.py
+```
+
+换成你自己的模型：把生成那一步换掉就行，记忆那半边一行都不用动。
+
+```python
+def my_reply(text, memory_context):        # 同步函数也可以，会自动丢线程
+    return my_model.generate(system=memory_context, user=text)
+
+vm = VoiceMem(reply=my_reply)
 ```
 
 ## 🛠️ 模型微调

@@ -96,7 +96,7 @@ snapshot_download(repo_id=sys.argv[1], local_dir=f"{sys.argv[2]}/reply_adapter")
 PY
   echo "      用它：export VOICEMEM_REPLY_ADAPTER=${DEST}/reply_adapter"
   echo "      这是 adapter 不是完整模型——基座 Qwen/Qwen3.6-35B-A3B 要另取，按它自己的 license。"
-  echo "      跑：python examples/04_voice_agent_own_model.py"
+  echo "      跑：python examples/03_simple_agent_with_voicemem_memory.py"
 else
   echo "[2/2] 跳过回复模型 adapter（要的话加 --reply-adapter）"
 fi

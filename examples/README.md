@@ -1,107 +1,71 @@
 # examples
 
-Four runnable examples, in three groups.
+三个能直接跑的例子，从「当记忆库用」到「做一个会说话的 agent」。
 
 ```bash
 pip install -e .
 export OPENAI_API_KEY=sk-...
 ```
 
-## 1. VoiceMem as a memory engine
-
-Your program calls it to **store** and **recall**. It does not reply.
-
-[`01_memory.py`](01_memory.py) is `ingest` then `search`. Only the input differs:
-
-| | stores | uses |
+| | 干什么 | 额外要什么 |
 |---|---|---|
-| default | three lines of text | left brain only |
-| `--audio` | a wav file | both brains, plus ASR / voiceprint / scene / emotion |
+| [`01_memory.py`](01_memory.py) | 存和查 —— 最小用法 | 音频那半段要 `bash scripts/download_models.sh` |
+| [`02_streaming.py`](02_streaming.py) | 流式接口：喂音频块，看每一轮算出了什么 | 同上 |
+| [`03_simple_agent_with_voicemem_memory.py`](03_simple_agent_with_voicemem_memory.py) | 完整语音 agent：边听边取记忆、说话时能被打断 | `pip install openai sounddevice scipy kokoro` |
+
+## 01 · 存和查
 
 ```bash
 python examples/01_memory.py
-python examples/01_memory.py --audio speech.wav --ask "what did I say about food?"
 ```
 
-The audio path needs `bash scripts/download_models.sh` for the local models. Nothing
-is seeded in that path, so pass `--ask` something your recording actually talks
-about, or the result is empty.
+两种输入，区别只在 `mode`：
 
-## 2. Building a voice agent
+```python
+VoiceMem(mode="normal")           # 音频 → 双脑（ASR / 声纹 / 场景 / 情绪都跑）
+VoiceMem(mode="leftbrain_only")   # 文本 → 只有左脑（事实），不做情绪归因
+```
 
-Mic in, memory prefetched while you speak, reply spoken out, turn stored.
-**These two differ only in who generates the reply** — the memory half is identical.
+查出来的东西分两半：`result.result_leftbrain` 是事实，`result.result_rightbrain`
+是画像和情绪。
 
-| | reply model | needs |
-|---|---|---|
-| [`03_voice_agent.py`](03_voice_agent.py) | OpenAI (default) | `pip install sounddevice` |
-| [`04_voice_agent_own_model.py`](04_voice_agent_own_model.py) | your fine-tuned Qwen adapter | a 35B base, see the file header |
+## 02 · 流式接口
 
 ```bash
-python examples/03_voice_agent.py
-python examples/04_voice_agent_own_model.py
+python examples/02_streaming.py speech.wav
 ```
 
-Both speak. Synthesis runs alongside generation — `speak_stream()` sends each
-finished sentence to TTS while the rest is still being written, so the first words
-are audible before the reply is done:
+按块喂音频，每块回一个状态；VAD 判定说完时 `state` 变成 `turn_over`，这时候
+`memory_context` 早就算好了 —— 检索是在你还在说的时候后台跑完的，不占回复前面
+那段时间。
 
-```python
-async for pcm in speak_stream(vm.reply_stream(turn)):
-    spk.write(pcm)
+`turn_over` 那一刻能拿到的全部字段：
+
+```
+result_leftbrain / result_rightbrain    这一轮检索到的记忆
+speaker_id / speaker_voiceprint         谁在说
+emotion / transcript                    情绪 / 转写
+entity / schema / text_embedding        抽出的实体、槽位、向量
 ```
 
-The voice is OpenAI's by default; `TTS_BACKEND=local` with `VOICEMEM_TTS_MODEL`
-pointing at a piper `.onnx` keeps it fully offline. See `voicemem/tts.py`.
+## 03 · 完整语音 agent
 
-Pass `on_partial=` to `vm.stream()` to watch the transcript as it forms — both
-examples already do, printing each partial in place.
-
-## 3. Swapping internal components
-
-[`05_custom_asr_vad.py`](05_custom_asr_vad.py) is not a separate application — it is
-**the parts-replacement guide for `03`**. Everything above uses the built-in ASR/VAD;
-this shows how to use yours instead. Two ways:
-
-**Way 1 — swap the components.** For an ASR that eats audio chunk by chunk and can
-report the transcript so far:
-
-```python
-vm = VoiceMem(asr=lambda: MyASR(), vad=lambda: MyVAD())   # zero-arg factories
+```bash
+python examples/03_simple_agent_with_voicemem_memory.py
 ```
 
-The whole protocol, with `samples` as float32 / 16 kHz / mono / [-1, 1]:
+麦克风 → voicemem 边听边预取记忆 → OpenAI 带着记忆回答 → Kokoro 本地 TTS 出声，
+**你一开口它就闭嘴**。想看 web 版（带脑图和记忆面板）用 `python web/run.py`。
 
-```python
-class MyASR:
-    def reset(self): ...                 # start of a turn
-    def feed(self, samples) -> str: ...  # transcript so far
-    def flush(self) -> str: ...          # optional, tail flush
+## 一个坑：记忆库不能混用
 
-class MyVAD:
-    def is_speech(self, samples) -> bool: ...
-```
-
-**Way 2 — feed text only.** Your ASR/VAD already run elsewhere (cloud, OS, another
-process), so VoiceMem never touches audio and loads no audio model:
-
-```python
-await stream.feed_partial("I'm allergic")
-turn = (await stream.feed_partial("I'm allergic to nuts", ended=True)).turn
-```
-
-`ended=True` is your VAD saying the utterance is complete.
-
-## One gotcha: memory stores are not interchangeable
-
-Without `memory_root` every example shares one store (`results/voice_memory` under
-the package). Point them somewhere else to keep them separate:
+不传 `memory_root` 时所有例子共用同一个库（包目录下的 `results/voice_memory`）。
+想各跑各的就显式指定：
 
 ```python
 VoiceMem(..., memory_root="/tmp/my_mem")
 ```
 
-**Changing the embedding dimension makes an existing store unusable.** The default
-OpenAI embedding is 1536-d; the local E5 from
-`from_config({"embedding": {"provider": "local"}})` is 384-d. Aiming both at the same
-`memory_root` fails with a shape mismatch.
+**embedding 换了维度就不能共用旧库** —— 默认的 OpenAI embedding 是 1536 维，
+`from_config({"embedding": {"provider": "local"}})` 的本地 E5 是 384 维，
+指向同一个 `memory_root` 会直接报维度不匹配。

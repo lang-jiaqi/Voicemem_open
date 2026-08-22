@@ -21,7 +21,7 @@
     async def my_fn(text, memory_context): yield delta    # 异步生成器（流式）
 
 **TTS 不在这里。** 回复层只产出文本；要出声用 ``voicemem/tts.py``——
-``speak_stream(vm.reply_stream(turn))`` 边生成边合成，见 examples/03_voice_agent.py。
+``speak_stream(vm.reply_stream(turn))`` 边生成边合成，见 examples/03_simple_agent_with_voicemem_memory.py。
 """
 from __future__ import annotations
 
