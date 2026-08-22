@@ -57,15 +57,35 @@ python examples/03_simple_agent_with_voicemem_memory.py
 麦克风 → voicemem 边听边预取记忆 → OpenAI 带着记忆回答 → Kokoro 本地 TTS 出声，
 **你一开口它就闭嘴**。想看 web 版（带脑图和记忆面板）用 `python web/run.py`。
 
-## 一个坑：记忆库不能混用
+## 为什么都用 `from_config` 而不是 `VoiceMem(openai_key=...)`
 
-不传 `memory_root` 时所有例子共用同一个库（包目录下的 `results/voice_memory`）。
-想各跑各的就显式指定：
+三个例子的 embedding 和 slots 都走本地 E5：
 
 ```python
-VoiceMem(..., memory_root="/tmp/my_mem")
+vm = VoiceMem.from_config({
+    "mode": "normal",
+    "embedding": {"provider": "local"},   # 记忆向量：本地，0 网络
+    "slots":     {"provider": "local"},   # 槽位分类：本地，0 LLM
+    "api_key":   os.environ["OPENAI_API_KEY"],   # 只在写入侧抽事实时用
+})
 ```
 
-**embedding 换了维度就不能共用旧库** —— 默认的 OpenAI embedding 是 1536 维，
-`from_config({"embedding": {"provider": "local"}})` 的本地 E5 是 384 维，
-指向同一个 `memory_root` 会直接报维度不匹配。
+这不是可选的优化 —— **投机预取那 0–500ms 预算里不能走网络**。你说话的时候检索
+就在后台跑，说完时记忆得是现成的；embedding 要是每次发一个 HTTP 去 OpenAI，
+光往返就吃掉整个预算。README 里的 134ms 说的就是这套配置，实测 search 本体 ~10ms。
+
+`VoiceMem(openai_key=...)` 这种默认构造用的是 OpenAI embedding，也能跑，只是
+每轮检索都要联网。
+
+## 顺带一个坑：库不能混用
+
+不传 `memory_root` 时所有例子和 web demo 共用同一个库（包目录下的
+`results/voice_memory`）。**向量维度不同的库不能混用** —— 本地 E5 是 384 维、
+OpenAI 是 1536 维，指同一个目录会直接报：
+
+```
+ValueError: shapes (25,384) and (1536,) not aligned
+```
+
+例子现在跟 demo 用同一套本地配置，所以不会撞上。要各跑各的就显式指定
+`memory_root`。

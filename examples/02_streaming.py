@@ -12,7 +12,13 @@ import soundfile as sf
 
 from voicemem import VoiceMem
 
-vm = VoiceMem(mode="normal", openai_key=os.environ["OPENAI_API_KEY"])
+# 本地 E5：检索 0 网络，投机预取才来得及（跟 web demo 同一套配置）
+vm = VoiceMem.from_config({
+    "mode": "normal",
+    "embedding": {"provider": "local"},
+    "slots": {"provider": "local"},
+    "api_key": os.environ["OPENAI_API_KEY"],   # 只用于写入侧抽事实
+})
 WAV = sys.argv[1] if len(sys.argv) > 1 else "speech.wav"
 
 
